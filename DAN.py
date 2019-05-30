@@ -13,16 +13,24 @@ from torch.utils.data import DataLoader
 import ResNet as models
 from torch.utils import model_zoo
 
+import visdom
+import numpy as np
+
+# To use this:
+# python -m visdom.server
+# http://localhost:8097/
+vis = visdom.Visdom(env=u'DAN')
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 32
 epochs = 200
-lr = 0.01
+lr = 1e-3
 momentum = 0.9
 no_cuda = False
 seed = 8
-log_interval = 10
+log_interval = 50
 l2_decay = 5e-4
 root_path = "./"
 source_list = "./Cut_off_grade_1_train_list.csv"
@@ -119,6 +127,7 @@ def train(epoch, model):
     iter_source = iter(source_loader)
     iter_target = iter(target_train_loader)
     num_iter = len_source_loader  # 88
+    TP, TN, FN, FP = 0, 0, 0, 0
     for i in range(1, num_iter):
         data_source, label_source = next(iter_source)
         data_target, _ = next(iter_target)
@@ -136,21 +145,57 @@ def train(epoch, model):
                               target=label_source)  # the negative log likelihood loss
         gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper
         loss = loss_cls + gamma * loss_mmd
+
+        pred = score_source_pred.data.max(1)[1]
+        TP += ((pred == 1) & (label_source.data.view_as(pred) == 1)).cpu().sum()
+        TN += ((pred == 0) & (label_source.data.view_as(pred) == 0)).cpu().sum()
+        FN += ((pred == 0) & (label_source.data.view_as(pred) == 1)).cpu().sum()
+        FP += ((pred == 1) & (label_source.data.view_as(pred) == 0)).cpu().sum()
+        p = TP / (TP + FP)
+        r = TP / (TP + FN)
+        F1score = 2 * r * p / (r + p)
+
         loss.backward()
         optimizer.step()
 
         if i % log_interval == 0:
+            # opts = dict(xlabel='minibatches',
+            #             ylabel='Loss',
+            #             title='Training Loss',
+            #             legend=['Loss']))
+            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=loss_cls.cpu().data.numpy(), win='CNN risk',
+                     update='append',
+                     opts={'title': 'CNN risk'})
+            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=np.array([gamma]), win='penalty parameter',
+                     update='append',
+                     opts={'title': 'penalty parameter'})
+            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=loss_mmd.cpu().data.numpy(),
+                     win='loss of MK_MMD', update='append',
+                     opts={'title': 'loss of MK_MMD'})
+            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=loss.cpu().data.numpy(), win='total loss',
+                     update='append',
+                     opts={'title': 'total loss'})
+            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=np.array([F1score]),
+                     win='training F1 score',
+                     update='append',
+                     opts={'title': 'training F1 score'})
             print('{} Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
                 datetime.now(), epoch, i * len(data_source), len_source_dataset,
                                        100. * i / len_source_loader, loss.data[0], loss_cls.data[0], loss_mmd.data[0]))
 
 
-def test(model):
+def test(epoch, model):
     model.eval()
     test_loss = 0
     correct = 0
+    TP, TN, FN, FP = 0, 0, 0, 0
+    F1score = 0
 
-    for data, label in target_test_loader:  # data_shape: torch.Size([32, 3, 224, 224])
+    iter_test = iter(target_test_loader)
+    num_iter_test = len_target_loader
+
+    for i in range(1, num_iter_test):
+        data, label = next(iter_test)  # data_shape: torch.Size([32, 3, 224, 224])
         data, label = data.float(), label.long()
         if cuda:
             data, label = data.cuda(), label.cuda()
@@ -160,10 +205,23 @@ def test(model):
         pred = s_output.data.max(1)[1]  # get the index of the max log-probability, s_output_shape: torch.Size([32, 31])
         correct += pred.eq(label.data.view_as(pred)).cpu().sum()
 
+        TP += ((pred == 1) & (label.data.view_as(pred) == 1)).cpu().sum()
+        TN += ((pred == 0) & (label.data.view_as(pred) == 0)).cpu().sum()
+        FN += ((pred == 0) & (label.data.view_as(pred) == 1)).cpu().sum()
+        FP += ((pred == 1) & (label.data.view_as(pred) == 0)).cpu().sum()
+
+        p = TP / (TP + FP)
+        r = TP / (TP + FN)
+        F1score = 2 * r * p / (r + p)
+        vis.line(X=np.array([i + (epoch - 1) * len_target_dataset]), Y=np.array([F1score]),
+                 win='testing F1 score',
+                 update='append',
+                 opts={'title': 'testing F1 score'})
+
     test_loss /= len_target_dataset
-    print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
+    print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}\n'.format(
         datetime.now(), target_name, test_loss, correct, len_target_dataset,
-        100. * correct / len_target_dataset))
+        100. * correct / len_target_dataset, F1score))
 
     return correct
 
@@ -177,10 +235,15 @@ if __name__ == '__main__':
     model = load_pretrain(model)
     for epoch in range(1, epochs + 1):
         train(epoch, model)
-        t_correct = test(model)
+        t_correct = test(epoch, model)
+        # Save models.
         ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
+        print('Save model: {}'.format(ckpt_name))
         torch.save(obj=model.state_dict(), f=ckpt_name)
         if t_correct > correct:
             correct = t_correct
+        current_acc = 100. * t_correct / len_target_dataset
+        # vis.line(X=np.array([epoch]), Y=np.array([current_acc]), win='accuracy', update='append',
+        #          opts={'title': 'current accuracy'})
         print('{} source: {} to target: {} max correct: {} max accuracy{: .2f}%\n'.format(
             datetime.now(), source_name, target_name, correct, 100. * correct / len_target_dataset))
