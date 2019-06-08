@@ -3,7 +3,7 @@ import math
 import torch.utils.model_zoo as model_zoo
 import mmd
 import torch
-from torchvision import models
+# from torchvision import models
 
 __all__ = ['ResNet', 'resnet50']
 # __all__ = ['AlexNet', 'alexnet']
@@ -150,11 +150,45 @@ class ResNet(nn.Module):
 
         return x
 
+class AlexNet(nn.Module):
+
+    def __init__(self, num_classes=1000):
+        super(AlexNet, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(6, 64, kernel_size=11, stride=4, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(64, 192, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+            nn.Conv2d(192, 384, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(384, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2),
+        )
+        self.classifier = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(256 * 6 * 6, 4096),
+            nn.ReLU(inplace=True),
+            nn.Dropout(),
+            nn.Linear(4096, 4096),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, num_classes),
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), 256 * 6 * 6)
+        x = self.classifier(x)
+        return x
 
 class AlexNetFc(nn.Module):
     def __init__(self):
         super(AlexNetFc, self).__init__()
-        model_alexnet = models.alexnet(pretrained=True)
+        model_alexnet = AlexNet()
         self.features = model_alexnet.features
         # self.x_view = 0  # todo:
         self.classifier = nn.Sequential()
@@ -186,42 +220,60 @@ class DAN_with_Alex(nn.Module):
 
     def __init__(self, num_classes=2):
         super(DAN_with_Alex, self).__init__()
-        self.l6 = alexnet().classifier[0]
-        self.l7 = alexnet().classifier[3]
-        self.l8 = alexnet().classifier[5]
+        # self.conv1=alexnet().features[0]
+        self.features = alexnet().features
+        # for i in range(1,13):
+        #     exec('self.features{} = alexnet().features[{}]'.format(i, i))
 
-    def forward(self, source,target):
-        loss=0
-        source=self.l6(source)
-        if self.training==True:
-            target=self.l6(target)
-            loss+=mmd.mmd_rbf_noaccelerate(source,target)
-        source=alexnet().classifier[1](source)
-        source = alexnet().classifier[2](source)
-        if self.training==True:
-            target=alexnet().classifier[1](target)
-            target=alexnet().classifier[2](target)
-        source=self.l7(source)
-        if self.training==True:
-            target=self.l7(target)
+        self.l6 = alexnet().classifier[0]
+        self.cls1 = alexnet().classifier[1]
+        self.cls2 = alexnet().classifier[2]
+        self.l7 = alexnet().classifier[3]
+        self.cls4 = alexnet().classifier[4]
+        self.l8 = alexnet().classifier[5]
+        self.cls_fc = nn.Linear(4096, num_classes)
+
+    def forward(self, source, target):
+        loss = 0
+        # source=self.conv1(source)
+        source = self.features(source)
+        source = source.view(source.size(0), 256 * 6 * 6)
+        source = self.l6(source)
+        if self.training == True:
+            # target=self.conv1(target)
+            target = self.features(target)
+            target = target.view(target.size(0), 256 * 6 * 6)
+            target = self.l6(target)
             loss += mmd.mmd_rbf_noaccelerate(source, target)
-        source = alexnet().classifier[3](source)
-        source = alexnet().classifier[4](source)
-        if self.training==True:
-            target=alexnet().classifier[3](target)
-            target=alexnet().classifier[4](target)
+        self.cls1.cuda()
+        self.cls2.cuda()
+        source = self.cls1(source)
+        source = self.cls2(source)
+        if self.training == True:
+            target = self.cls1(target)
+            target = self.cls2(target)
+        source = self.l7(source)
+        if self.training == True:
+            target = self.l7(target)
+            loss += mmd.mmd_rbf_noaccelerate(source, target)
+        source = self.l7(source)
+        self.cls4.cuda()
+        source = self.cls4(source)
+        if self.training == True:
+            target = self.l7(target)
+            target = self.cls4(target)
         source = self.l8(source)
         if self.training == True:
             target = self.l8(target)
             loss += mmd.mmd_rbf_noaccelerate(source, target)
-        source = alexnet().classifier[6](source)
+        source = self.cls_fc(source)
         # if self.training == True:
         #     target = alexnet().classifier[6](target)
-        return source,loss
+        return source, loss
 
 
 def alexnet(pretrained=False, **kwargs):
-    model = AlexNetFc()
+    model = AlexNet()
     for name, params in model.named_parameters():
         if name.find('conv') != -1:
             torch.nn.init.xavier_normal(params[0])
