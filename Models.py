@@ -3,11 +3,14 @@ import math
 import torch.utils.model_zoo as model_zoo
 import mmd
 import torch
+from torchvision import models
 
 __all__ = ['ResNet', 'resnet50']
+# __all__ = ['AlexNet', 'alexnet']
 
 model_urls = {
     'resnet50': 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
+    'alexnet': 'https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth',
 }
 
 
@@ -94,7 +97,7 @@ class ResNet(nn.Module):
         self.inplanes = 64
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3,
-                               bias=False)#todo:input_channels
+                               bias=False, )  # todo:input_channels
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(
             inplace=True)  # inplace means that it will not allocate new memory and change tensors inplace.
@@ -143,17 +146,99 @@ class ResNet(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
         x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
+        x = x.view(x.size(0), -1)  # before classifier
 
         return x
 
 
+class AlexNetFc(nn.Module):
+    def __init__(self):
+        super(AlexNetFc, self).__init__()
+        model_alexnet = models.alexnet(pretrained=True)
+        self.features = model_alexnet.features
+        # self.x_view = 0  # todo:
+        self.classifier = nn.Sequential()
+        for i in range(6):
+            self.classifier.add_module("classifier" + str(i), model_alexnet.classifier[i])
+        self.__in_features = model_alexnet.classifier[6].in_features  # nn.Linear(in_features=,)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), 256 * 6 * 6)
+        # self.x_view = x.view(x.size(0), 256 * 6 * 6)
+        x = self.classifier(x)
+        return x
+
+    def output_num(self):
+        return self.__in_features
+
+
+# self.classifier = nn.Sequential(
+#             nn.Dropout(),
+#             nn.Linear(256 * 6 * 6, 4096),
+#             nn.ReLU(inplace=True),
+#             nn.Dropout(),
+#             nn.Linear(4096, 4096),
+#             nn.ReLU(inplace=True),
+#             nn.Linear(4096, num_classes),
+#         )
+class DAN_with_Alex(nn.Module):
+
+    def __init__(self, num_classes=2):
+        super(DAN_with_Alex, self).__init__()
+        self.l6 = alexnet().classifier[0]
+        self.l7 = alexnet().classifier[3]
+        self.l8 = alexnet().classifier[5]
+
+    def forward(self, source,target):
+        loss=0
+        source=self.l6(source)
+        if self.training==True:
+            target=self.l6(target)
+            loss+=mmd.mmd_rbf_noaccelerate(source,target)
+        source=alexnet().classifier[1](source)
+        source = alexnet().classifier[2](source)
+        if self.training==True:
+            target=alexnet().classifier[1](target)
+            target=alexnet().classifier[2](target)
+        source=self.l7(source)
+        if self.training==True:
+            target=self.l7(target)
+            loss += mmd.mmd_rbf_noaccelerate(source, target)
+        source = alexnet().classifier[3](source)
+        source = alexnet().classifier[4](source)
+        if self.training==True:
+            target=alexnet().classifier[3](target)
+            target=alexnet().classifier[4](target)
+        source = self.l8(source)
+        if self.training == True:
+            target = self.l8(target)
+            loss += mmd.mmd_rbf_noaccelerate(source, target)
+        source = alexnet().classifier[6](source)
+        # if self.training == True:
+        #     target = alexnet().classifier[6](target)
+        return source,loss
+
+
+def alexnet(pretrained=False, **kwargs):
+    model = AlexNetFc()
+    for name, params in model.named_parameters():
+        if name.find('conv') != -1:
+            torch.nn.init.xavier_normal(params[0])
+        elif name.find('fc') != -1:
+            torch.nn.init.xavier_normal(params[0])
+            torch.nn.init.xavier_normal(params[1])
+    if pretrained:
+        model.load_state_dict(model_zoo.load_url(model_urls['alexnet']), strict=False)
+    return model
+
+
 class DANNet(nn.Module):
 
-    def __init__(self, num_classes=2):#todo
+    def __init__(self, num_classes=2):  # todo
         super(DANNet, self).__init__()
-        self.sharedNet = resnet50(False)
-        self.cls_fc = nn.Linear(8192, num_classes)#todo:2048
+        self.sharedNet = resnet50(pretrained=False)
+        self.cls_fc = nn.Linear(8192, num_classes)  # todo:2048
 
     def forward(self, source, target):
         loss = 0
@@ -176,6 +261,12 @@ def resnet50(pretrained=False, **kwargs):
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
     model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
+    for name, params in model.named_parameters():
+        if name.find('conv') != -1:
+            torch.nn.init.xavier_normal(params[0])
+        elif name.find('fc') != -1:
+            torch.nn.init.xavier_normal(params[0])
+            torch.nn.init.xavier_normal(params[1])
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet50']), strict=False)
     return model
