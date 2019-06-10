@@ -10,7 +10,7 @@ import math
 import data_loader
 from custom_data_io import custom_dset
 from torch.utils.data import DataLoader
-import ResNet as models
+import Models as models
 from torch.utils import model_zoo
 
 import visdom
@@ -19,19 +19,19 @@ import numpy as np
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'DAN')
+vis = visdom.Visdom(env=u'DAN_Alex')
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
-batch_size = 32
+batch_size = 96
 epochs = 200
-lr = 1e-3
+lr = 1e-4
 momentum = 0.9
 no_cuda = False
 seed = 8
 log_interval = 50
-l2_decay = 5e-4
+l2_decay = 1e-4  # todo
 root_path = "./"
 source_list = "./Cut_off_grade_1_train_list.csv"
 target_list = "./Cut_off_grade_1_val_list.csv"
@@ -52,8 +52,8 @@ if cuda:
 
 # kwargs = {'num_workers': 1, 'pin_memory': True} if cuda else {}  # torch.utils.data.DataLoader()
 
-source_dataset = custom_dset(txt_path=source_list, nx=227, nz=227)  # todo:
-target_dataset = custom_dset(txt_path=target_list, nx=227, nz=227)
+source_dataset = custom_dset(txt_path=source_list, nx=227, nz=227)
+target_dataset = custom_dset(txt_path=target_list, nx=227, nz=227)  # todo:transform=None
 
 source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=6, pin_memory=True,
                            drop_last=True)
@@ -69,6 +69,19 @@ len_source_dataset = len(source_dataset)  # a2817
 len_target_dataset = len(target_dataset)  # w795
 len_source_loader = len(source_loader)  # a88
 len_target_loader = len(target_train_loader)  # w24
+
+
+def load_pretrain_alex(model, alexnet_model=True):
+    url = 'https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth'
+    if alexnet_model == True:
+        pretrained_dict = model_zoo.load_url(url)
+        model_dict = model.state_dict()
+        for k, v in pretrained_dict.items():
+            if not 'classifier' in k:
+                if not "features.0" in k:
+                    if not "cls" in k:
+                        model_dict[k] = pretrained_dict[k]
+    return model
 
 
 def load_pretrain(model, resnet_model=True):
@@ -116,11 +129,23 @@ def load_pretrain_v0(model):
 
 def train(epoch, model):
     LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)
-    print('learning rate{: .4f}'.format(LEARNING_RATE))
-    optimizer = torch.optim.SGD([
-        {'params': model.sharedNet.parameters()},  # lr=LEARNING_RATE / 10
+    print('learning rate{: .6f}'.format(LEARNING_RATE))
+    # optimizer = torch.optim.Adam([
+    #     {'params': model.sharedNet.parameters()},  # lr=LEARNING_RATE / 10
+    #     {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+    # ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+    ## AlexNet optimizer
+    optimizer = torch.optim.Adam([
+        # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+        {'params': model.features.parameters()},  # lr=LEARNING_RATE / 10
+        {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
+        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+        {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
+        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+        {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
         {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-    ], lr=LEARNING_RATE / 10, momentum=momentum, weight_decay=l2_decay)
+    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
 
     model.train()
 
@@ -151,9 +176,20 @@ def train(epoch, model):
         TN += ((pred == 0) & (label_source.data.view_as(pred) == 0)).cpu().sum()
         FN += ((pred == 0) & (label_source.data.view_as(pred) == 1)).cpu().sum()
         FP += ((pred == 1) & (label_source.data.view_as(pred) == 0)).cpu().sum()
-        p = TP / (TP + FP)
-        r = TP / (TP + FN)
-        F1score = 2 * r * p / (r + p)
+        if (TP + FP) != 0:
+            p = TP / (TP + FP)
+        else:
+            p = 0
+        if (TP + FN) != 0:
+            r = TP / (TP + FN)
+        else:
+            r = 0
+        if (r + p) != 0:
+            F1score = 2 * r * p / (r + p)
+        else:
+            F1score = 0
+
+        train_acc = (TP + TN) / (TP + TN + FP + FN)
 
         loss.backward()
         optimizer.step()
@@ -163,22 +199,26 @@ def train(epoch, model):
             #             ylabel='Loss',
             #             title='Training Loss',
             #             legend=['Loss']))
-            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=loss_cls.cpu().data.numpy(), win='CNN risk',
+            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss_cls.cpu().data.numpy(), win='loss_cls',
                      update='append',
                      opts={'title': 'CNN risk'})
-            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=np.array([gamma]), win='penalty parameter',
+            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([gamma]), win='gamma',
                      update='append',
                      opts={'title': 'penalty parameter'})
-            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=loss_mmd.cpu().data.numpy(),
-                     win='loss of MK_MMD', update='append',
+            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss_mmd.cpu().data.numpy(),
+                     win='loss_mmd', update='append',
                      opts={'title': 'loss of MK_MMD'})
-            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=loss.cpu().data.numpy(), win='total loss',
+            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss.cpu().data.numpy(), win='loss',
                      update='append',
                      opts={'title': 'total loss'})
-            vis.line(X=np.array([i + (epoch - 1) * len_source_dataset]), Y=np.array([F1score]),
+            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([F1score]),
                      win='training F1 score',
                      update='append',
                      opts={'title': 'training F1 score'})
+            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([train_acc]),
+                     win='train_acc',
+                     update='append',
+                     opts={'title': 'training accuracy'})
             print('{} Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
                 datetime.now(), epoch, i * len(data_source), len_source_dataset,
                                        100. * i / len_source_loader, loss.data[0], loss_cls.data[0], loss_mmd.data[0]))
@@ -210,13 +250,26 @@ def test(epoch, model):
         FN += ((pred == 0) & (label.data.view_as(pred) == 1)).cpu().sum()
         FP += ((pred == 1) & (label.data.view_as(pred) == 0)).cpu().sum()
 
-        p = TP / (TP + FP)
-        r = TP / (TP + FN)
-        F1score = 2 * r * p / (r + p)
-        vis.line(X=np.array([i + (epoch - 1) * len_target_dataset]), Y=np.array([F1score]),
+        if (TP + FP) != 0:
+            p = TP / (TP + FP)
+        else:
+            p = 0
+        if (TP + FN) != 0:
+            r = TP / (TP + FN)
+        else:
+            r = 0
+        if (r + p) != 0:
+            F1score = 2 * r * p / (r + p)
+        else:
+            F1score = 0
+        vis.line(X=np.array([i + (epoch - 1) * len_target_loader]), Y=np.array([F1score]),
                  win='testing F1 score',
                  update='append',
                  opts={'title': 'testing F1 score'})
+        vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([correct / len_target_dataset]),
+                 win='test_acc',
+                 update='append',
+                 opts={'title': 'testing accuracy'})
 
     test_loss /= len_target_dataset
     print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}\n'.format(
@@ -227,12 +280,13 @@ def test(epoch, model):
 
 
 if __name__ == '__main__':
-    model = models.DANNet(num_classes=2)  # ResNet.py#todo:
+    # model = models.DANNet(num_classes=2)  # Models.py#todo:
+    model = models.DAN_with_Alex(num_classes=2)
     correct = 0
     print(model)
     if cuda:
         model.cuda()
-    model = load_pretrain(model)
+    model = load_pretrain_alex(model)
     for epoch in range(1, epochs + 1):
         train(epoch, model)
         t_correct = test(epoch, model)
