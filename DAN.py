@@ -24,14 +24,14 @@ vis = visdom.Visdom(env=u'DAN_Alex')
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
-batch_size = 96
+batch_size = 96  # todo
 epochs = 200
-lr = 1e-4
+lr = 5e-5
 momentum = 0.9
 no_cuda = False
 seed = 8
 log_interval = 50
-l2_decay = 1e-4  # todo
+l2_decay = 1e-3  # todo
 root_path = "./"
 source_list = "./Cut_off_grade_1_train_list.csv"
 target_list = "./Cut_off_grade_1_val_list.csv"
@@ -168,7 +168,8 @@ def train(epoch, model):
         score_source_pred, loss_mmd = model(data_source, data_target)
         loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
                               target=label_source)  # the negative log likelihood loss
-        gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper
+        gamma = 2 / (1 + math.exp(-50 * (epoch) / epochs)) - 1  # lambda in DAN paper
+        loss_mmd = loss_mmd.cuda()
         loss = loss_cls + gamma * loss_mmd
 
         pred = score_source_pred.data.max(1)[1]
@@ -210,7 +211,7 @@ def train(epoch, model):
                      opts={'title': 'loss of MK_MMD'})
             vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss.cpu().data.numpy(), win='loss',
                      update='append',
-                     opts={'title': 'total loss'})
+                     opts={'title': 'total loss'})  # todo:mmd visualization
             vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([F1score]),
                      win='training F1 score',
                      update='append',
@@ -219,6 +220,8 @@ def train(epoch, model):
                      win='train_acc',
                      update='append',
                      opts={'title': 'training accuracy'})
+
+            # todo:mmd result
             print('{} Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
                 datetime.now(), epoch, i * len(data_source), len_source_dataset,
                                        100. * i / len_source_loader, loss.data[0], loss_cls.data[0], loss_mmd.data[0]))
