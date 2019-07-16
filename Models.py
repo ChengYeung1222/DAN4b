@@ -3,6 +3,7 @@ import math
 import torch.utils.model_zoo as model_zoo
 import mmd
 import torch
+
 # from torchvision import models
 
 __all__ = ['ResNet', 'resnet50']
@@ -150,6 +151,7 @@ class ResNet(nn.Module):
 
         return x
 
+
 class AlexNet(nn.Module):
 
     def __init__(self, num_classes=1000):
@@ -174,7 +176,7 @@ class AlexNet(nn.Module):
             nn.Linear(256 * 6 * 6, 4096),
             nn.ReLU(inplace=True),
             nn.Dropout(),
-            nn.Linear(4096, 4096),
+            nn.Linear(4096, 4096),  # todo
             nn.ReLU(inplace=True),
             nn.Linear(4096, num_classes),
         )
@@ -184,6 +186,7 @@ class AlexNet(nn.Module):
         x = x.view(x.size(0), 256 * 6 * 6)
         x = self.classifier(x)
         return x
+
 
 class AlexNetFc(nn.Module):
     def __init__(self):
@@ -244,7 +247,8 @@ class DAN_with_Alex(nn.Module):
             target = self.features(target)
             target = target.view(target.size(0), 256 * 6 * 6)
             target = self.l6(target)
-            loss += mmd.mmd_rbf_noaccelerate(source, target)
+            # !!!!!!!!
+            loss += mmd.mmd_rbf_noaccelerate(source, target)  # todo: add mmd
         self.cls1.cuda()
         self.cls2.cuda()
         source = self.cls1(source)
@@ -255,6 +259,7 @@ class DAN_with_Alex(nn.Module):
         source = self.l7(source)
         if self.training == True:
             target = self.l7(target)
+            # !!!!!!!!
             loss += mmd.mmd_rbf_noaccelerate(source, target)
         source = self.l7(source)
         self.cls4.cuda()
@@ -265,6 +270,7 @@ class DAN_with_Alex(nn.Module):
         source = self.l8(source)
         if self.training == True:
             target = self.l8(target)
+            # !!!!!!!!
             loss += mmd.mmd_rbf_noaccelerate(source, target)
         source = self.cls_fc(source)
         # if self.training == True:
@@ -315,10 +321,10 @@ def resnet50(pretrained=False, **kwargs):
     model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
     for name, params in model.named_parameters():
         if name.find('conv') != -1:
-            torch.nn.init.xavier_normal(params[0])
+            torch.nn.init.kaiming_normal_(params[0])
         elif name.find('fc') != -1:
-            torch.nn.init.xavier_normal(params[0])
-            torch.nn.init.xavier_normal(params[1])
+            torch.nn.init.kaiming_normal_(params[0])
+            torch.nn.init.kaiming_normal_(params[1])
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet50']), strict=False)
     return model
