@@ -4,10 +4,23 @@ import os
 import numpy as np
 import struct
 import torch
+from torchvision import transforms
+
+import logging
+import time
 
 
 def default_loader(img):
     return Image.open(img)
+
+
+def img_transform():
+    transform = transforms.Compose(
+        [transforms.Resize([256, 256]),
+         transforms.RandomCrop(224),  # todo
+         transforms.RandomHorizontalFlip(),
+         transforms.ToTensor()])
+    return transform
 
 
 class custom_dset(Dataset):
@@ -16,41 +29,51 @@ class custom_dset(Dataset):
                  img_transform=None,
                  n_channels=6,
                  nx=227,
-                 nz=227
+                 nz=227,
+                 labeled=True
                  ):
         self.nx = nx
         self.nz = nz
         self.n_channels = n_channels
         self.img_list = []
         self.label_list = []
+        self.labeled=labeled
         with open(txt_path, 'r') as f:
             lines = f.readlines()
             # print(len(lines))
             for line in lines:
                 # print(line)
-                items = line.split(',')  # .csv
-                self.img_list.append(items[0])
-                self.label_list.append(int(items[1]))
+                if labeled==True:
+                    items = line.split(',')  # .csv
+                    self.img_list.append(items[0])
+                    self.label_list.append(int(items[1]))
+                else:
+                    self.img_list.append(line[:-1])
         self.img_transform = img_transform
 
     def __getitem__(self, index):
         img_path = self.img_list[index]
-        label = self.label_list[index]
+        if self.labeled:
+            label = self.label_list[index]
         # img = self.loader(img_path)
         img = img_path
         img = self._xshow(img)
         if self.img_transform is not None:
-            img = self.img_transform(img)
-        return img, label
+            self.img_transform()
+        if self.labeled:
+            return img, label
+        else:
+            return img
 
     def __len__(self):
-        return len(self.label_list)
+        return len(self.img_list)
 
     def _xshow(self, filename):
         nx = self.nx
         nz = self.nz
         n_channels = self.n_channels
         f = open(filename, "rb")
+        # logging.info('open file:%s'%(filename))
         pic = np.zeros((nx, nz, n_channels))
 
         for i in range(nx):
@@ -70,8 +93,14 @@ def collate_fn(batch):
     img, label = zip(*batch)
     return img, label
 
-# dset = custom_dset('./top100_list.csv')
-# custom_loader = DataLoader(dset, batch_size=8, shuffle=True,)# collate_fn=collate_fn)
-# img, label = custom_loader.__iter__().__next__()
+# dset = custom_dset('./top100_list.csv',labeled=False)
+# custom_loader = DataLoader(dset, batch_size=1, shuffle=False,)# collate_fn=collate_fn)
+# img = custom_loader.__iter__().__next__()
+# # custom_loader.__getitem__().img_path
+# iter_custom=iter(custom_loader)
+# for i in range(len(custom_loader)):
+#
+#     data=next(iter_custom)
+#
 # print(img)
 # print(dset[0][0])
