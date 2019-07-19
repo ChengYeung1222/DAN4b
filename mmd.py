@@ -5,6 +5,8 @@ import torch
 from torch.autograd import Variable
 
 import logging
+
+
 # logging.disable(level=logging.CRITICAL)
 # logging.basicConfig(level=logging.DEBUG,format='%(asctime)s-%(levelname)s-%(message)s')
 
@@ -108,7 +110,8 @@ def guassian_kernel_no_loop(source, target, kernel_mul=2.0, kernel_num=5, fix_si
         bandwidth = torch.sum(L2_distance.data) / (n_samples ** 2 - n_samples)
     bandwidth /= kernel_mul ** (kernel_num // 2)
     bandwidth_list = [bandwidth * (kernel_mul ** i) for i in range(kernel_num)]
-    kernel_val = [torch.exp(-L2_distance / bandwidth_temp) for bandwidth_temp in bandwidth_list]
+    kernel_val = [torch.exp(-L2_distance / bandwidth_temp if bandwidth_temp != 0 else -L2_distance) for bandwidth_temp
+                  in bandwidth_list]
     return sum(kernel_val)  # /len(kernel_val)
 
 
@@ -130,7 +133,7 @@ def mmd_rbf_noaccelerate(source, target, kernel_mul=2.0, kernel_num=5, fix_sigma
     # logging.debug('computing gaussian kernel')
     # kernels=torch.zeros(batch_size*2,batch_size*2)
     kernels = guassian_kernel_no_loop(source, target,
-                                       kernel_mul=kernel_mul, kernel_num=kernel_num, fix_sigma=fix_sigma)
+                                      kernel_mul=kernel_mul, kernel_num=kernel_num, fix_sigma=fix_sigma)
     # logging.debug('x & x prime')
     XX = kernels[:batch_size, :batch_size]
     # logging.debug('y & y prime')
