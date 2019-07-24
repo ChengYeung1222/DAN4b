@@ -49,12 +49,13 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # Training settings
 batch_size = 256  # todo
 epochs = 200
-lr = 1e-4
+lr = 1e-4  # todo:1e-4,1e-3
 momentum = 0.9
 no_cuda = False
 seed = 8
-log_interval = 20
-l2_decay = 1e-4  # todo
+log_interval = 50
+log_interval_test = 10
+l2_decay = 5e-4  # todo:1e-4 5e-4
 root_path = "./"
 source_list = "./train_list.csv"
 target_list = "./pre_list.csv"
@@ -81,11 +82,11 @@ source_dataset = custom_dset(txt_path=source_list, nx=227, nz=227, labeled=True)
 target_dataset = custom_dset(txt_path=target_list, nx=227, nz=227, labeled=False)  # todo:transform=None
 validation_dataset = custom_dset(txt_path=validation_list, nx=227, nz=227, labeled=True)
 
-source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
+source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=10, pin_memory=True,
                            drop_last=True)
-target_train_loader = DataLoader(target_dataset, batch_size=batch_size, shuffle=True, num_workers=16, pin_memory=True,
+target_train_loader = DataLoader(target_dataset, batch_size=batch_size, shuffle=True, num_workers=10, pin_memory=True,
                                  drop_last=True)
-target_test_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=16,
+target_test_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=10,
                                 pin_memory=True)
 
 # source_loader = data_loader.load_training(root_path, source_name, batch_size, kwargs)
@@ -98,6 +99,28 @@ len_test_dataset = len(validation_dataset)
 len_source_loader = len(source_loader)  # a88
 len_target_loader = len(target_train_loader)  # w24
 len_test_loader = len(target_test_loader)
+
+with open(source_list, 'r') as f:
+    lines = f.readlines()
+    len_source_ones = 0
+    len_source_zeros = 0
+    for line in lines:
+        items = line.split(',')
+
+        if int(items[1]) == 1:
+            len_source_ones += 1
+    len_source_zeros = len_source_dataset - len_source_ones
+
+with open(validation_list, 'r') as f:
+    lines = f.readlines()
+    len_val_ones = 0
+    len_val_zeros = 0
+    for line in lines:
+        items = line.split(',')
+
+        if int(items[1]) == 1:
+            len_val_ones += 1
+    len_val_zeros = len_test_dataset - len_val_ones
 
 
 def load_pretrain_alex(model, alexnet_model=True):
@@ -176,7 +199,7 @@ def train(epoch, model):
         {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
         {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
         {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)#todo:momentum=momentum,
 
     model.train()
 
@@ -216,7 +239,30 @@ def train(epoch, model):
 
         score_source_pred, loss_mmd = model(data_source, data_target)
         logging.debug('Calculating loss_cls...')
-        loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
+        prob_source_pred = F.softmax(score_source_pred, dim=1)
+        # log_softmax_source_pred = F.log_softmax(score_source_pred, dim=1)
+        y_1 = prob_source_pred[:, 1]
+        y_0 = prob_source_pred[:, 0]
+        # max_prob = torch.max(prob_source_pred, dim=1)[0]
+        # max_index = torch.max(prob_source_pred, dim=1)[1]
+        # min_index = torch.min(prob_source_pred, dim=1)[1]
+        ratio_source = y_1 / y_0 * len_source_zeros / len_source_ones  # todo:
+        # prob_source_pred[:, max_index] = prob_source_pred[:, max_index] * len_source_zeros / len_source_dataset
+        # prob_source_pred[:, min_index] = prob_source_pred[:, min_index] * len_source_ones / len_source_dataset
+        # prob_source_pred[:, max_index] = ratio_source / (ratio_source + 1)
+        # prob_source_pred[:, min_index] = 1 / (ratio_source + 1)
+        prob_source_pred_new = torch.Tensor(prob_source_pred.size()).cuda()
+        prob_source_pred_new[:, 1] = ratio_source.data / (ratio_source.data + 1)
+        prob_source_pred_new[:, 0] = 1 / (ratio_source.data + 1)
+        prob_source_pred_new = Variable(prob_source_pred_new)
+
+        # for ii, ind in enumerate(max_index):
+        #     logging.debug('ind=%s' % (ind))
+        #     logging.debug('ind.data=%s' % (ind.cpu().data.numpy()[0]))
+        #     prob_source_pred[ii, 1] = ratio_source[ii] / (ratio_source[ii] + 1)
+        #     prob_source_pred[ii, 0] = 1 / (ratio_source[ii] + 1)
+
+        loss_cls = F.nll_loss(F.log_softmax(score_source_pred,dim=1),
                               target=label_source)  # the negative log likelihood loss
         gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper#todo:-50
         logging.debug('Push mmd to gpu...')
@@ -227,7 +273,7 @@ def train(epoch, model):
 
         # loss = loss_cls
 
-        pred = score_source_pred.data.max(1)[1]
+        pred = prob_source_pred_new.data.max(1)[1]
 
         logging.debug('compute training f1 score and accuracy')
         TP += ((pred == 1) & (label_source.data.view_as(pred) == 1)).cpu().sum()
@@ -308,8 +354,25 @@ def test(epoch, model):
             data, label = data.cuda(), label.cuda()
         data, label = Variable(data, volatile=True), Variable(label)
         s_output, _ = model(data, data)
-        test_loss += F.nll_loss(F.log_softmax(s_output, dim=1), label, size_average=False).data[0]  # sum up batch loss
-        pred = s_output.data.max(1)[1]  # get the index of the max log-probability, s_output_shape: torch.Size([32, 31])
+        prob_val_pred = F.softmax(s_output, dim=1)
+        # log_softmax_val_pred = F.log_softmax(s_output, dim=1)
+        y_1 = prob_val_pred[:, 1]
+        y_0 = prob_val_pred[:, 0]
+        # max_prob = torch.max(prob_val_pred, dim=1)[0]
+        # max_index = torch.max(prob_val_pred, dim=1)[1]
+        # min_index = torch.min(prob_val_pred, dim=1)[1]
+        ratio_val = y_1 / y_0 * len_val_zeros / len_val_ones
+        prob_val_pred_new = torch.Tensor(prob_val_pred.size()).cuda()
+        prob_val_pred_new[:, 1] = ratio_val.data / (ratio_val.data + 1)
+        prob_val_pred_new[:, 0] = 1 / (ratio_val.data + 1)
+        # for ii, ind in enumerate(max_index):
+        #     prob_val_pred[ii, ind.cpu().data.numpy()[0]] = ratio_val[ii] / (ratio_val[ii] + 1)
+        #     prob_val_pred[ii, 1 - ind.cpu().data.numpy()[0]] = 1 * (ratio_val[ii] + 1)
+        prob_val_pred_new = Variable(prob_val_pred_new)
+        test_loss += F.nll_loss(F.log_softmax(s_output,dim=1), label, size_average=False).data[0]  # sum up batch loss
+        loss_val = F.nll_loss(F.log_softmax(s_output,dim=1), label).data[0]
+        pred = prob_val_pred_new.data.max(1)[
+            1]  # get the index of the max log-probability, s_output_shape: torch.Size([32, 31])
         correct += pred.eq(label.data.view_as(pred)).cpu().sum()
 
         TP += ((pred == 1) & (label.data.view_as(pred) == 1)).cpu().sum()
@@ -338,6 +401,10 @@ def test(epoch, model):
                      win='test_acc',
                      update='append',
                      opts={'title': 'testing accuracy'})
+            vis.line(X=np.array([i + (epoch - 1) * len_test_loader]), Y=np.array([loss_val]),
+                     win='loss_val',
+                     update='append',
+                     opts={'title': 'testing loss'})
 
     test_loss /= len_test_dataset
     print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}\n'.format(
