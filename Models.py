@@ -175,8 +175,8 @@ class AlexNet(nn.Module):
             nn.Dropout(),
             nn.Linear(256 * 6 * 6, 4096),
             nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),  # todo
+            nn.Dropout(),  # todo:0.5,0.7
+            nn.Linear(4096, 4096),
             nn.ReLU(inplace=True),
             nn.Linear(4096, num_classes),
         )
@@ -278,14 +278,23 @@ class DAN_with_Alex(nn.Module):
         return source, loss
 
 
-def alexnet(pretrained=False, **kwargs):
+def alexnet(pretrained=False, frozen=True,**kwargs):
     model = AlexNet()
     for name, params in model.named_parameters():
-        if name.find('conv') != -1:
-            torch.nn.init.xavier_normal(params[0])
-        elif name.find('fc') != -1:
-            torch.nn.init.xavier_normal(params[0])
-            torch.nn.init.xavier_normal(params[1])
+        if frozen:
+            if name.find('3')!= -1:
+                params.requires_grad = False
+            if name.find('6') != -1:
+                params.requires_grad = False
+        if name.find('bias') == -1:
+            if name.find('features') != -1:
+                torch.nn.init.kaiming_normal(params)
+            # if name.find('conv2')!=-1:
+
+            elif name.find('classifier') != -1:
+                torch.nn.init.kaiming_normal(params)
+        else:
+            torch.nn.init.constant(params, val=0.01)
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['alexnet']), strict=False)
     return model
