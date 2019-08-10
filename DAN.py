@@ -55,7 +55,7 @@ no_cuda = False
 seed = 8
 log_interval = 50
 log_interval_test = 20
-l2_decay = 1e-3  # todo:5e-4
+l2_decay = 1e-3  # todo:5e-4,1e-3,5e-3
 root_path = "./"
 source_list = "./train_list.csv"
 target_list = "./pre_list.csv"
@@ -75,6 +75,7 @@ cuda = not no_cuda and torch.cuda.is_available()
 torch.manual_seed(seed)
 if cuda:
     torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.benchmark = True
 
 # kwargs = {'num_workers': 1, 'pin_memory': True} if cuda else {}  # torch.utils.data.DataLoader()
 
@@ -181,17 +182,17 @@ def train(epoch, model):
     #     {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
     # ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
     # AlexNet optimizer
-    optimizer = torch.optim.Adam([
-        # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
-        {'params': model.features.parameters()},  # lr=LEARNING_RATE / 10
-        {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
-        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
-        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
-        {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
-        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
-        {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
-        {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+    optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
+        [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+            {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
+            {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+        ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
 
     model.train()
 
@@ -241,7 +242,7 @@ def train(epoch, model):
 
         loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
                               target=label_source)  # the negative log likelihood loss
-        gamma = 2 / (1 + math.exp(-50 * (epoch) / epochs)) - 1  # lambda in DAN paper#todo:-10
+        gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper#todo:-10
         logging.debug('Push mmd to gpu...')
         # !!!!
         loss_mmd = loss_mmd.cuda()
@@ -316,6 +317,7 @@ def train(epoch, model):
 
 def test(epoch, model):
     model.eval()
+
     test_loss = 0
     correct = 0
     TP, TN, FN, FP = 0, 0, 0, 0
