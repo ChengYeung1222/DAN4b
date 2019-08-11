@@ -3,6 +3,7 @@ import math
 import torch.utils.model_zoo as model_zoo
 import mmd
 import torch
+import logging
 
 # from torchvision import models
 
@@ -171,15 +172,27 @@ class AlexNet(nn.Module):
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
         )
-        self.classifier = nn.Sequential(
-            nn.Dropout(),
-            nn.Linear(256 * 6 * 6, 4096),
-            nn.ReLU(inplace=True),
-            nn.Dropout(),  # todo:0.5,0.7
-            nn.Linear(4096, 4096),
-            nn.ReLU(inplace=True),
-            nn.Linear(4096, num_classes),
-        )
+        logging.debug('self.training=%d' % self.training)
+        if self.training == True:
+            self.classifier = nn.Sequential(
+
+                nn.Dropout(),
+                nn.Linear(256 * 6 * 6, 4096),
+                nn.ReLU(inplace=True),
+
+                nn.Dropout(),  # todo:0.5,0.7
+                nn.Linear(4096, 4096),
+                nn.ReLU(inplace=True),
+                nn.Linear(4096, num_classes),
+            )
+        else:
+            self.classifier = nn.Sequential(
+                nn.Linear(256 * 6 * 6, 4096),
+                nn.ReLU(inplace=True),
+                nn.Linear(4096, 4096),
+                nn.ReLU(inplace=True),
+                nn.Linear(4096, num_classes),
+            )
 
     def forward(self, x):
         x = self.features(x)
@@ -219,7 +232,7 @@ class AlexNetFc(nn.Module):
 #             nn.ReLU(inplace=True),
 #             nn.Linear(4096, num_classes),
 #         )
-class DAN_with_Alex(nn.Module):
+class DAN_with_Alex(nn.Module):  # todo
 
     def __init__(self, num_classes=2):
         super(DAN_with_Alex, self).__init__()
@@ -241,9 +254,10 @@ class DAN_with_Alex(nn.Module):
         # source=self.conv1(source)
         source = self.features(source)
         source = source.view(source.size(0), 256 * 6 * 6)
-        source = self.l6(source)
+
         if self.training == True:
             # target=self.conv1(target)
+            source = self.l6(source)
             target = self.features(target)
             target = target.view(target.size(0), 256 * 6 * 6)
             target = self.l6(target)
@@ -256,12 +270,10 @@ class DAN_with_Alex(nn.Module):
         if self.training == True:
             target = self.cls1(target)
             target = self.cls2(target)
-        source = self.l7(source)
-        if self.training == True:
+            source = self.l7(source)
             target = self.l7(target)
             # !!!!!!!!
             loss += mmd.mmd_rbf_noaccelerate(source, target)
-        source = self.l7(source)
         self.cls4.cuda()
         source = self.cls4(source)
         if self.training == True:
@@ -278,12 +290,12 @@ class DAN_with_Alex(nn.Module):
         return source, loss
 
 
-def alexnet(pretrained=False, frozen=True,**kwargs):
+def alexnet(pretrained=False, frozen=False, **kwargs):
     model = AlexNet()
     for name, params in model.named_parameters():
-        if frozen:
-            if name.find('3')!= -1:
-                params.requires_grad = False
+        if frozen:  # todo:
+            # if name.find('3')!= -1:
+            #     params.requires_grad = False
             if name.find('6') != -1:
                 params.requires_grad = False
         if name.find('bias') == -1:
