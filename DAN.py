@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 import Models as models
 from torch.utils import model_zoo
 
+from sklearn import metrics
+
 import visdom
 import numpy as np
 
@@ -48,7 +50,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo
-epochs = 200
+epochs = 22  # 22
 lr = 1e-4  # todo:1e-4,1e-3
 momentum = 0.9
 no_cuda = False
@@ -242,7 +244,7 @@ def train(epoch, model):
 
         loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
                               target=label_source)  # the negative log likelihood loss
-        gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper#todo:-10
+        gamma = 2 / (1 + math.exp(-10 * (epoch) / 200)) - 1  # lambda in DAN paper#todo:denominator: epochs
         logging.debug('Push mmd to gpu...')
         # !!!!
         loss_mmd = loss_mmd.cuda()
@@ -253,7 +255,14 @@ def train(epoch, model):
 
         pred = prob_source_pred_new.data.max(1)[1]
 
-        logging.debug('compute training f1 score and accuracy')
+        logging.debug('compute training auc, f1 score and accuracy')
+        # prob=[]
+        # index_max=prob_source_pred_new.data.max(1)[1]
+        # for ii in range(batch_size):
+        #     prob.append(prob_source_pred_new.data[ii,index_max[ii]])
+        fpr, tpr, thresholds = metrics.roc_curve(y_true=label_source.data, y_score=prob_source_pred.data[:, 1],
+                                                 pos_label=1)
+        auc_value = metrics.auc(fpr, tpr)
         TP += ((pred == 1) & (label_source.data.view_as(pred) == 1)).cpu().sum()
         TN += ((pred == 0) & (label_source.data.view_as(pred) == 0)).cpu().sum()
         FN += ((pred == 0) & (label_source.data.view_as(pred) == 1)).cpu().sum()
@@ -297,6 +306,10 @@ def train(epoch, model):
             # vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss.cpu().data.numpy(), win='loss',
             #          update='append',
             #          opts={'title': 'total loss'})  # todo:mmd visualization
+            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([auc_value]),
+                     win='training auc',
+                     update='append',
+                     opts={'title': 'training auc'})
             vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([F1score]),
                      win='training F1 score',
                      update='append',
@@ -347,6 +360,14 @@ def test(epoch, model):
             1]  # get the index of the max log-probability, s_output_shape: torch.Size([32, 31])
         correct += pred.eq(label.data.view_as(pred)).cpu().sum()
 
+        # fpr, tpr, thresholds = metrics.roc_curve(y_true=label_source.data, y_score=prob_source_pred.data[:, 1],
+        #                                          pos_label=1)
+        # auc_value = metrics.auc(fpr, tpr)
+
+        fpr, tpr, thresholds = metrics.roc_curve(y_true=label.data, y_score=prob_val_pred.data[:, 1],
+                                                 pos_label=1)
+
+        auc_value_test = metrics.auc(fpr, tpr)
         TP += ((pred == 1) & (label.data.view_as(pred) == 1)).cpu().sum()
         TN += ((pred == 0) & (label.data.view_as(pred) == 0)).cpu().sum()
         FN += ((pred == 0) & (label.data.view_as(pred) == 1)).cpu().sum()
@@ -365,6 +386,10 @@ def test(epoch, model):
         else:
             F1score = 0
         if i % log_interval_test == 0:
+            vis.line(X=np.array([i + (epoch - 1) * len_test_loader]), Y=np.array([auc_value_test]),
+                     win='testing auc',
+                     update='append',
+                     opts={'title': 'testing auc'})
             vis.line(X=np.array([i + (epoch - 1) * len_test_loader]), Y=np.array([F1score]),
                      win='testing F1 score',
                      update='append',
@@ -379,9 +404,9 @@ def test(epoch, model):
                      opts={'title': 'testing loss'})
 
     test_loss /= len_test_dataset
-    print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}\n'.format(
+    print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}, auc: {}\n'.format(
         datetime.now(), test_name, test_loss, correct, len_test_dataset,
-        100. * correct / len_test_dataset, F1score))
+        100. * correct / len_test_dataset, F1score, auc_value_test))
 
     return correct
 
