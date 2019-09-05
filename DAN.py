@@ -44,13 +44,13 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'DAN_Alex')
+vis = visdom.Visdom(env=u'DYGZ_DAN_Alex')
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo
-epochs = 22  # 22
+epochs = 50  # 26
 lr = 1e-4  # todo:1e-4,1e-3
 momentum = 0.9
 no_cuda = False
@@ -59,12 +59,12 @@ log_interval = 50
 log_interval_test = 20
 l2_decay = 1e-3  # todo:5e-4,1e-3,5e-3
 root_path = "./"
-source_list = "./train_list.csv"
-target_list = "./pre_list.csv"
-validation_list = './val_list.csv'
-source_name = 'known zone'  # todo
-target_name = 'unknown zone'
-test_name = 'validation'
+source_list = "./DYGZ_shallow.csv"
+target_list = "./DYGZ_deep.csv"  # todo: 70500
+validation_list = './DYGZ_deep.csv'
+source_name = 'shallow zone'  # todo
+target_name = 'deep zone'
+test_name = 'deep zone/validation'
 ckpt_path = './ckpt/'
 ckpt_model = './ckpt/model_epoch1.pth'
 
@@ -176,7 +176,7 @@ def load_pretrain_v0(model):
 
 
 def train(epoch, model):
-    LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)
+    LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / 200), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
     # optimizer = torch.optim.Adam([
