@@ -200,7 +200,7 @@ def train(epoch, model):
 
     iter_source = iter(source_loader)
     iter_target = iter(target_train_loader)
-    num_iter = len_source_loader  # 88
+    num_iter = max(len_source_loader, len_target_loader)# 88
     TP, TN, FN, FP = 0, 0, 0, 0
     for i in range(1, num_iter):
         logging.debug('Start %dth iteration...' % (i))
