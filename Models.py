@@ -4,6 +4,8 @@ import torch.utils.model_zoo as model_zoo
 import mmd
 import torch
 import logging
+from SpatialCrossMapLRN_temp import SpatialCrossMapLRN_temp
+from torch.autograd import Variable
 
 # from torchvision import models
 
@@ -20,6 +22,33 @@ def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, bias=False)
+
+
+class LambdaBase(nn.Sequential):
+    def __init__(self, fn, *args):
+        super(LambdaBase, self).__init__(*args)
+        self.lambda_func = fn
+
+    def forward_prepare(self, input):
+        output = []
+        for module in self._modules.values():
+            output.append(module(input))
+        return output if output else input
+
+
+class Lambda(LambdaBase):
+    def forward(self, input):
+        return self.lambda_func(self.forward_prepare(input))
+
+
+def CrossMapLRN(size, alpha, beta, k=1.0, gpuDevice=0):
+    if SpatialCrossMapLRN_temp is not None:
+        lrn = SpatialCrossMapLRN_temp(size, alpha, beta, k, gpuDevice=gpuDevice)
+        n = Lambda(lambda x, lrn=lrn: Variable(lrn.forward(x.data).cuda(gpuDevice)) if x.data.is_cuda else Variable(
+            lrn.forward(x.data)))
+    else:
+        n = nn.LocalResponseNorm(size, alpha, beta, k).cuda(gpuDevice)
+    return n
 
 
 class BasicBlock(nn.Module):
@@ -158,12 +187,14 @@ class AlexNet(nn.Module):
     def __init__(self, num_classes=1000):
         super(AlexNet, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(6, 64, kernel_size=11, stride=4, padding=2),
+            nn.Conv2d(4, 64, kernel_size=11, stride=4, padding=2),  # todo
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
+            # CrossMapLRN(5, 0.0001, 0.75),#todo
             nn.Conv2d(64, 192, kernel_size=5, padding=2),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
+            # CrossMapLRN(5, 0.0001, 0.75),
             nn.Conv2d(192, 384, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(384, 256, kernel_size=3, padding=1),
@@ -176,14 +207,14 @@ class AlexNet(nn.Module):
         if self.training == True:
             self.classifier = nn.Sequential(
 
-                nn.Dropout(),
-                nn.Linear(256 * 6 * 6, 4096),
+                nn.Dropout(0.5),  # todo
+                nn.Linear(256 * 6 * 6, 2048),
                 nn.ReLU(inplace=True),
 
-                nn.Dropout(),  # todo:0.5,0.7
-                nn.Linear(4096, 4096),
+                nn.Dropout(0.5),  # todo:0.5,0.7
+                nn.Linear(2048, 2048),  # todo:4096
                 nn.ReLU(inplace=True),
-                nn.Linear(4096, num_classes),
+                nn.Linear(2048, num_classes),  # todo:2048
             )
         else:
             self.classifier = nn.Sequential(
@@ -247,10 +278,14 @@ class DAN_with_Alex(nn.Module):  # todo
         self.l7 = alexnet().classifier[3]
         self.cls4 = alexnet().classifier[4]
         self.l8 = alexnet().classifier[5]
-        self.cls_fc = nn.Linear(4096, num_classes)
+        self.cls_fc = nn.Linear(2048, num_classes)  # todo:4096
 
     def forward(self, source, target):
-        loss = 0
+        loss = .0
+        source_i, target_i = source, target
+        kernel_i = mmd.guassian_kernel_no_loop(
+            source.data.view(source.shape[0], source.shape[1] * source.shape[2] * source.shape[3]),
+            target.data.view(target.shape[0], target.shape[1] * target.shape[2] * target.shape[3]))
         # source=self.conv1(source)
         source = self.features(source)
         source = source.view(source.size(0), 256 * 6 * 6)
@@ -262,7 +297,7 @@ class DAN_with_Alex(nn.Module):  # todo
             target = target.view(target.size(0), 256 * 6 * 6)
             target = self.l6(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target)  # todo: add mmd
+            loss += mmd.mmd_rbf_noaccelerate(source, target, kernel_i)  # todo: add mmd
         self.cls1.cuda()
         self.cls2.cuda()
         source = self.cls1(source)
@@ -273,7 +308,7 @@ class DAN_with_Alex(nn.Module):  # todo
             source = self.l7(source)
             target = self.l7(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target)
+            loss += mmd.mmd_rbf_noaccelerate(source, target, kernel_i)  # todo
         self.cls4.cuda()
         source = self.cls4(source)
         if self.training == True:
@@ -283,7 +318,7 @@ class DAN_with_Alex(nn.Module):  # todo
         if self.training == True:
             target = self.l8(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target)
+            loss += mmd.mmd_rbf_noaccelerate(source, target, kernel_i)  # todo:wommd
         source = self.cls_fc(source)
         # if self.training == True:
         #     target = alexnet().classifier[6](target)
@@ -294,8 +329,8 @@ def alexnet(pretrained=False, frozen=False, **kwargs):
     model = AlexNet()
     for name, params in model.named_parameters():
         if frozen:  # todo:
-            # if name.find('3')!= -1:
-            #     params.requires_grad = False
+            if name.find('3') != -1:
+                params.requires_grad = False
             if name.find('6') != -1:
                 params.requires_grad = False
         if name.find('bias') == -1:

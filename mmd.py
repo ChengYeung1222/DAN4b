@@ -86,6 +86,9 @@ def guassian_kernel_one_loop(source, target, kernel_mul=2.0, kernel_num=5, fix_s
 def guassian_kernel_no_loop(source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
     n_samples = int(source.size()[0]) + int(target.size()[0])
     # logging.debug('concatenating source and target matrices')
+    # if len(source.shape) != 2:
+    #     source=source.data.resize(source.shape[0], source.shape[1] * source.shape[2] * source.shape[3])
+    #     target=target.data.resize(target.shape[0], target.shape[1] * target.shape[2] * target.shape[3])
     total = torch.cat([source, target], dim=0)
     # logging.debug('matrix product')
     m = torch.matmul(total, total.t())
@@ -107,7 +110,10 @@ def guassian_kernel_no_loop(source, target, kernel_mul=2.0, kernel_num=5, fix_si
     if fix_sigma:
         bandwidth = fix_sigma
     else:
-        bandwidth = torch.sum(L2_distance.data) / (n_samples ** 2 - n_samples)
+        try:
+            bandwidth = torch.sum(L2_distance.data) / (n_samples ** 2 - n_samples)
+        except RuntimeError:
+            bandwidth = torch.sum(L2_distance) / (n_samples ** 2 - n_samples)
     bandwidth /= kernel_mul ** (kernel_num // 2)
     bandwidth_list = [bandwidth * (kernel_mul ** i) for i in range(kernel_num)]
     kernel_val = [torch.exp(-L2_distance / bandwidth_temp if bandwidth_temp != 0 else -L2_distance) for bandwidth_temp
@@ -128,20 +134,20 @@ def mmd_rbf_accelerate(source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=N
     return loss / float(batch_size)
 
 
-def mmd_rbf_noaccelerate(source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
+def mmd_rbf_noaccelerate(source, target, kernel_i, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
     batch_size = int(source.size()[0])  # [32,2048]
     # logging.debug('computing gaussian kernel')
     # kernels=torch.zeros(batch_size*2,batch_size*2)
     kernels = guassian_kernel_no_loop(source, target,
                                       kernel_mul=kernel_mul, kernel_num=kernel_num, fix_sigma=fix_sigma)
     # logging.debug('x & x prime')
-    XX = kernels[:batch_size, :batch_size]
+    XX = kernels[:batch_size, :batch_size] * Variable(kernel_i[:batch_size, :batch_size])
     # logging.debug('y & y prime')
-    YY = kernels[batch_size:, batch_size:]
+    YY = kernels[batch_size:, batch_size:] * Variable(kernel_i[batch_size:, batch_size:])
     # logging.debug('x & y prime')
-    XY = kernels[:batch_size, batch_size:]
+    XY = kernels[:batch_size, batch_size:] * Variable(kernel_i[:batch_size, batch_size:])
     # logging.debug('y & x prime')
-    YX = kernels[batch_size:, :batch_size]
+    YX = kernels[batch_size:, :batch_size] * Variable(kernel_i[batch_size:, :batch_size])
     # logging.debug('the mean embedding')
     loss = torch.mean(XX + YY - XY - YX)
     return loss
