@@ -13,6 +13,8 @@ from torch.utils.data import DataLoader
 import Models as models
 from torch.utils import model_zoo
 
+import radam
+
 from sklearn import metrics
 
 import visdom
@@ -44,28 +46,28 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'DYGZ_DAN_Alex')
+vis = visdom.Visdom(env=u'DYGZ_DAN_Alex_500')  # todo
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo
-epochs = 50  # 26
-lr = 1e-4  # todo:1e-4,1e-3
+epochs = 50  # depth: 1500 epoch: 48  auc: 0.928#todo
+lr = 1e-6  # todo:1e-4,1e-3
 momentum = 0.9
 no_cuda = False
-seed = 8
-log_interval = 50
-log_interval_test = 20
-l2_decay = 1e-3  # todo:5e-4,1e-3,5e-3
+seed = 5  # todo
+log_interval = 20 #14
+log_interval_test = 30
+l2_decay = 1e-5  # todo:5e-4,1e-3,5e-3
 root_path = "./"
-source_list = "./DYGZ_shallow.csv"
-target_list = "./DYGZ_deep.csv"  # todo: 70500
-validation_list = './DYGZ_deep.csv'
+source_list = "./depth_500/DYGZ_shallow_500.csv"
+target_list = "./depth_500/DYGZ_deep_500.csv"  # todo: 70500
+validation_list = './depth_500/DYGZ_deep_500.csv'
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
-ckpt_path = './ckpt/'
+ckpt_path = './ckpt_d500/'  # todo:wommd
 ckpt_model = './ckpt/model_epoch1.pth'
 
 # Create parent path if it doesn't exist
@@ -82,7 +84,7 @@ if cuda:
 # kwargs = {'num_workers': 1, 'pin_memory': True} if cuda else {}  # torch.utils.data.DataLoader()
 
 source_dataset = custom_dset(txt_path=source_list, nx=227, nz=227, labeled=True)
-target_dataset = custom_dset(txt_path=target_list, nx=227, nz=227, labeled=False)  # todo:transform=None
+target_dataset = custom_dset(txt_path=target_list, nx=227, nz=227, labeled=True)  # todo:transform=None
 validation_dataset = custom_dset(txt_path=validation_list, nx=227, nz=227, labeled=True)
 
 source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=10, pin_memory=True,
@@ -90,7 +92,7 @@ source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, 
 target_train_loader = DataLoader(target_dataset, batch_size=batch_size, shuffle=True, num_workers=10, pin_memory=True,
                                  drop_last=True)
 target_test_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=10,
-                                pin_memory=True)
+                                pin_memory=True, drop_last=True)
 
 # source_loader = data_loader.load_training(root_path, source_name, batch_size, kwargs)
 # target_train_loader = data_loader.load_training(root_path, target_name, batch_size, kwargs)
@@ -129,6 +131,7 @@ with open(validation_list, 'r') as f:
 def load_pretrain_alex(model, alexnet_model=True):
     url = 'https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth'
     if alexnet_model == True:
+
         pretrained_dict = model_zoo.load_url(url)
         model_dict = model.state_dict()
         for k, v in pretrained_dict.items():
@@ -156,36 +159,30 @@ def load_pretrain(model, resnet_model=True):
     return model
 
 
-def load_pretrain_v0(model):
-    for n, _ in model.named_parameters():
-        print(n)
-    url = 'https://download.pytorch.org/models/resnet50-19c8e357.pth'
-    pretrained_dict = model_zoo.load_url(url)
-    model_dict = model.state_dict()
-    # filter out unnecessary keys
-    pretrained_dict = {k: v for k, v in pretrained_dict.items() if
-                       (k in model_dict) and (model_dict[k].shape == pretrained_dict[k].shape)}
-
-    # overwrite entries in the existing state dict
-    model_dict.update(pretrained_dict)
-    for k, v in model_dict.items():
-        if not "cls_fc" in k:
-            model_dict[k] = pretrained_dict[k[k.find(".") + 1:]]
-    model.load_state_dict(model_dict)
-    return model
-
-
-def train(epoch, model):
-    LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / 200), 0.75)  # todo:denominator: epochs
+def train(epoch, model, optimizer_arg='radam'):
+    LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
     # optimizer = torch.optim.Adam([
     #     {'params': model.sharedNet.parameters()},  # lr=LEARNING_RATE / 10
     #     {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
     # ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
-    # AlexNet optimizer
-    optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
-        [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+    # AlexNet optimizeri;'k
+    if optimizer_arg == 'Adam':
+        optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
+            [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
+                {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
+                {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
+                {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
+                {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+            ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+
+    elif optimizer_arg == 'radam':
+        optimizer = radam.RAdam(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
             {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
             {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
             {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
@@ -194,13 +191,25 @@ def train(epoch, model):
             {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
             {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
             {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-        ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+        ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+
+    elif optimizer_arg == 'adamw':
+        optimizer = radam.AdamW(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+            {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
+            {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
+            {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+        ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
 
     model.train()
 
     iter_source = iter(source_loader)
     iter_target = iter(target_train_loader)
-    num_iter = max(len_source_loader, len_target_loader)# 88
+    num_iter = max(len_source_loader, len_target_loader)  # 88
     TP, TN, FN, FP = 0, 0, 0, 0
     for i in range(1, num_iter):
         logging.debug('Start %dth iteration...' % (i))
@@ -208,13 +217,15 @@ def train(epoch, model):
         logging.debug('data_source, label_source = next(iter_source)')
         data_source, label_source = next(iter_source)
         logging.debug('data_target, _ = next(iter_target)')
-        data_target = next(iter_target)
+        data_target, _ = next(iter_target)
         logging.debug('if i % len_target_loader == 0:')
-        # if i % len_source_loader == 0:
-        #     iter_source = iter(source_loader)
-        if i % len_target_loader == 0:
-            logging.debug('iter_target = iter(target_train_loader)')
-            iter_target = iter(target_train_loader)
+        if len_source_dataset < len_target_dataset:
+            if i % len_source_loader == 0:
+                iter_source = iter(source_loader)
+        else:
+            if i % len_target_loader == 0:
+                logging.debug('iter_target = iter(target_train_loader)')
+                iter_target = iter(target_train_loader)
 
         logging.debug('if cuda:')
         if cuda:
@@ -244,10 +255,11 @@ def train(epoch, model):
 
         loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
                               target=label_source)  # the negative log likelihood loss
-        gamma = 2 / (1 + math.exp(-10 * (epoch) / 200)) - 1  # lambda in DAN paper#todo:denominator: epochs
+        gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper#todo:denominator: epochs
         logging.debug('Push mmd to gpu...')
         # !!!!
-        loss_mmd = loss_mmd.cuda()
+
+        # loss_mmd = loss_mmd.cuda()#todo:
         loss = loss_cls + gamma * loss_mmd
         logging.debug('Calculate total loss')
 
@@ -364,10 +376,14 @@ def test(epoch, model):
         #                                          pos_label=1)
         # auc_value = metrics.auc(fpr, tpr)
 
+
         fpr, tpr, thresholds = metrics.roc_curve(y_true=label.data, y_score=prob_val_pred.data[:, 1],
                                                  pos_label=1)
 
-        auc_value_test = metrics.auc(fpr, tpr)
+        # if np.isnan(tpr).all():
+        #     tpr=np.full(shape=tpr.shape,fill_value=1e-8)
+
+        auc_value_test = metrics.auc(fpr, tpr)#todo
         TP += ((pred == 1) & (label.data.view_as(pred) == 1)).cpu().sum()
         TN += ((pred == 0) & (label.data.view_as(pred) == 0)).cpu().sum()
         FN += ((pred == 0) & (label.data.view_as(pred) == 1)).cpu().sum()
@@ -418,9 +434,9 @@ if __name__ == '__main__':
     print(model)
     if cuda:
         model.cuda()
-    model = load_pretrain_alex(model)
+    model = load_pretrain_alex(model, alexnet_model=True)
     for epoch in range(1, epochs + 1):
-        train(epoch, model)
+        train(epoch, model)#TODO
         t_correct = test(epoch, model)
         # Save models.
         ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
