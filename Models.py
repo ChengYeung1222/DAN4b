@@ -280,9 +280,11 @@ class DAN_with_Alex(nn.Module):  # todo
         self.l8 = alexnet().classifier[5]
         self.cls_fc = nn.Linear(2048, num_classes)  # todo:4096
 
-    def forward(self, source, target):
+    def forward(self, source, target, coordinate_source, coordinate_target, heterogeneity, fd_kernel=False):
         loss = .0
-        source_i, target_i = source, target
+        # if heterogeneity == True:
+        #     kernel_dist = mmd.distance_kernel(coordinate_source, coordinate_target)
+
         kernel_i = mmd.guassian_kernel_no_loop(
             source.data.view(source.shape[0], source.shape[1] * source.shape[2] * source.shape[3]),
             target.data.view(target.shape[0], target.shape[1] * target.shape[2] * target.shape[3]))
@@ -297,7 +299,8 @@ class DAN_with_Alex(nn.Module):  # todo
             target = target.view(target.size(0), 256 * 6 * 6)
             target = self.l6(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target, kernel_i)  # todo: add mmd
+            loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i,
+                                             heterogeneity)  # todo: add mmd
         self.cls1.cuda()
         self.cls2.cuda()
         source = self.cls1(source)
@@ -308,7 +311,8 @@ class DAN_with_Alex(nn.Module):  # todo
             source = self.l7(source)
             target = self.l7(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target, kernel_i)  # todo
+            loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i,
+                                             heterogeneity)  # todo
         self.cls4.cuda()
         source = self.cls4(source)
         if self.training == True:
@@ -318,7 +322,8 @@ class DAN_with_Alex(nn.Module):  # todo
         if self.training == True:
             target = self.l8(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target, kernel_i)  # todo:wommd
+            loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i,
+                                             heterogeneity)  # todo:wommd
         source = self.cls_fc(source)
         # if self.training == True:
         #     target = alexnet().classifier[6](target)
