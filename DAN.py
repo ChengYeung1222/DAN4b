@@ -53,21 +53,21 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # Training settings
 batch_size = 256  # todo
 epochs = 50  # depth: 1500 epoch: 48  auc: 0.928#todo
-lr = 1e-6  # todo:1e-4,1e-3
+lr = 1e-4  # todo:1e-4,1e-3
 momentum = 0.9
 no_cuda = False
 seed = 5  # todo
-log_interval = 20 #14
-log_interval_test = 30
+log_interval = 33  # 20
+log_interval_test = 3  # 30
 l2_decay = 1e-5  # todo:5e-4,1e-3,5e-3
 root_path = "./"
-source_list = "./depth_500/DYGZ_shallow_500.csv"
-target_list = "./depth_500/DYGZ_deep_500.csv"  # todo: 70500
-validation_list = './depth_500/DYGZ_deep_500.csv'
+source_list = "./depth_1500/DYGZ_shallow_1500.csv"
+target_list = "./depth_1500/DYGZ_deep_1500.csv"  # todo: 70500
+validation_list = './depth_1500/DYGZ_deep_1500.csv'
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
-ckpt_path = './ckpt_d500/'  # todo:wommd
+ckpt_path = './ckpt_d1500/'  # todo:wommd
 ckpt_model = './ckpt/model_epoch1.pth'
 
 # Create parent path if it doesn't exist
@@ -159,7 +159,7 @@ def load_pretrain(model, resnet_model=True):
     return model
 
 
-def train(epoch, model, optimizer_arg='radam'):
+def train(epoch, model, heterogeneity, optimizer_arg='radam'):
     LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
@@ -215,9 +215,9 @@ def train(epoch, model, optimizer_arg='radam'):
         logging.debug('Start %dth iteration...' % (i))
         print('Start %dth iteration...' % (i))
         logging.debug('data_source, label_source = next(iter_source)')
-        data_source, label_source = next(iter_source)
+        data_source, label_source, coordinate_source = next(iter_source)
         logging.debug('data_target, _ = next(iter_target)')
-        data_target, _ = next(iter_target)
+        data_target, _, coordinate_target = next(iter_target)
         logging.debug('if i % len_target_loader == 0:')
         if len_source_dataset < len_target_dataset:
             if i % len_source_loader == 0:
@@ -230,19 +230,21 @@ def train(epoch, model, optimizer_arg='radam'):
         logging.debug('if cuda:')
         if cuda:
             logging.debug('push source data to gpu')
-            data_source, label_source = data_source.cuda(), label_source.cuda()
+            data_source, label_source, coordinate_source = data_source.cuda(), label_source.cuda(), coordinate_source.cuda()
             logging.debug('push target data to gpu')
-            data_target = data_target.cuda()
+            data_target, coordinate_target = data_target.cuda(), coordinate_target.cuda()
 
         logging.debug('Variable source data')
-        data_source, label_source = Variable(data_source.float()), Variable(label_source.long())
+        data_source, label_source, coordinate_source = Variable(data_source.float()), Variable(
+            label_source.long()), Variable(coordinate_source.float())
         logging.debug('Variable target data')
-        data_target = Variable(data_target.float())
+        data_target, coordinate_target = Variable(data_target.float()), Variable(coordinate_target.float())
 
         logging.debug('clear old gradients from the last step')
         optimizer.zero_grad()
 
-        score_source_pred, loss_mmd = model(data_source, data_target)
+        score_source_pred, loss_mmd = model(data_source, data_target, coordinate_source, coordinate_target,
+                                            heterogeneity)  # todo
         logging.debug('Calculating loss_cls...')
         prob_source_pred = F.softmax(score_source_pred, dim=1)
         y_1 = prob_source_pred[:, 1]
@@ -376,14 +378,13 @@ def test(epoch, model):
         #                                          pos_label=1)
         # auc_value = metrics.auc(fpr, tpr)
 
-
         fpr, tpr, thresholds = metrics.roc_curve(y_true=label.data, y_score=prob_val_pred.data[:, 1],
                                                  pos_label=1)
 
         # if np.isnan(tpr).all():
         #     tpr=np.full(shape=tpr.shape,fill_value=1e-8)
 
-        auc_value_test = metrics.auc(fpr, tpr)#todo
+        auc_value_test = metrics.auc(fpr, tpr)  # todo
         TP += ((pred == 1) & (label.data.view_as(pred) == 1)).cpu().sum()
         TN += ((pred == 0) & (label.data.view_as(pred) == 0)).cpu().sum()
         FN += ((pred == 0) & (label.data.view_as(pred) == 1)).cpu().sum()
@@ -436,7 +437,7 @@ if __name__ == '__main__':
         model.cuda()
     model = load_pretrain_alex(model, alexnet_model=True)
     for epoch in range(1, epochs + 1):
-        train(epoch, model)#TODO
+        train(epoch, model, heterogeneity=True)  # TODO
         t_correct = test(epoch, model)
         # Save models.
         ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
