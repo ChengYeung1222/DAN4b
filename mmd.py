@@ -83,6 +83,25 @@ def guassian_kernel_one_loop(source, target, kernel_mul=2.0, kernel_num=5, fix_s
     return sum(kernel_val)  # /len(kernel_val)
 
 
+def distance_kernel(source, target):
+    n_samples = int(source.size()[0]) + int(target.size()[0])
+    total = torch.cat([source, target], dim=0)
+    total = (total - total.mean()) / total.std()
+    #positive definite
+    a = torch.rand(3, 1)
+    epsilon = 0.01 * torch.eye(3)
+    Sigma = Variable(((a.t()*a)+epsilon).cuda())
+    k_dist = torch.zeros(int(total.size(0)), int(total.size(0))).cuda()
+    k_dist = Variable(k_dist)
+    for i in range(total.size()[0]):
+        for j in range(total.size()[0]):
+            gaussian = torch.matmul((total[i, :] - total[j, :]).view(1, 3), Sigma)
+            gaussian = torch.matmul(gaussian, (total[i, :] - total[j, :]).view(3, 1))
+            gaussian = torch.exp(-gaussian)
+            k_dist[i, j] = gaussian
+    return k_dist
+
+
 def guassian_kernel_no_loop(source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
     n_samples = int(source.size()[0]) + int(target.size()[0])
     # logging.debug('concatenating source and target matrices')
@@ -134,20 +153,34 @@ def mmd_rbf_accelerate(source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=N
     return loss / float(batch_size)
 
 
-def mmd_rbf_noaccelerate(source, target, kernel_i, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
+def mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i, heterogeneity, fd_kernel=False,
+                         kernel_mul=2.0, kernel_num=5,
+                         fix_sigma=None):
     batch_size = int(source.size()[0])  # [32,2048]
     # logging.debug('computing gaussian kernel')
     # kernels=torch.zeros(batch_size*2,batch_size*2)
     kernels = guassian_kernel_no_loop(source, target,
                                       kernel_mul=kernel_mul, kernel_num=kernel_num, fix_sigma=fix_sigma)
-    # logging.debug('x & x prime')
-    XX = kernels[:batch_size, :batch_size] * Variable(kernel_i[:batch_size, :batch_size])
-    # logging.debug('y & y prime')
-    YY = kernels[batch_size:, batch_size:] * Variable(kernel_i[batch_size:, batch_size:])
-    # logging.debug('x & y prime')
-    XY = kernels[:batch_size, batch_size:] * Variable(kernel_i[:batch_size, batch_size:])
-    # logging.debug('y & x prime')
-    YX = kernels[batch_size:, :batch_size] * Variable(kernel_i[batch_size:, :batch_size])
-    # logging.debug('the mean embedding')
+    if heterogeneity == True:
+        kernels_dist = distance_kernel(coordinate_source, coordinate_target)
+        XX = kernels[:batch_size, :batch_size] * kernels_dist[:batch_size, :batch_size]
+        YY = kernels[batch_size:, batch_size:] * kernels_dist[batch_size:, batch_size:]
+        XY = kernels[:batch_size, batch_size:] * kernels_dist[:batch_size, batch_size:]
+        YX = kernels[batch_size:, :batch_size] * kernels_dist[batch_size:, :batch_size]
+    elif fd_kernel == True:
+        # logging.debug('x & x prime')
+        XX = kernels[:batch_size, :batch_size] * Variable(kernel_i[:batch_size, :batch_size])
+        # logging.debug('y & y prime')
+        YY = kernels[batch_size:, batch_size:] * Variable(kernel_i[batch_size:, batch_size:])
+        # logging.debug('x & y prime')
+        XY = kernels[:batch_size, batch_size:] * Variable(kernel_i[:batch_size, batch_size:])
+        # logging.debug('y & x prime')
+        YX = kernels[batch_size:, :batch_size] * Variable(kernel_i[batch_size:, :batch_size])
+        # logging.debug('the mean embedding')
+    else:
+        XX = kernels[:batch_size, :batch_size]
+        YY = kernels[batch_size:, batch_size:]
+        XY = kernels[:batch_size, batch_size:]
+        YX = kernels[batch_size:, :batch_size]
     loss = torch.mean(XX + YY - XY - YX)
     return loss
