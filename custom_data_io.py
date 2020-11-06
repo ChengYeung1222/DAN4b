@@ -9,7 +9,6 @@ from torchvision import transforms
 import logging
 import time
 
-
 def default_loader(img):
     return Image.open(img)
 
@@ -17,7 +16,7 @@ def default_loader(img):
 def img_transform():
     transform = transforms.Compose(
         [transforms.Resize([256, 256]),
-         transforms.RandomCrop(224),  # todo
+         transforms.RandomCrop(224),
          transforms.RandomHorizontalFlip(),
          transforms.ToTensor()])
     return transform
@@ -27,7 +26,7 @@ class custom_dset(Dataset):
     def __init__(self,
                  txt_path,
                  img_transform=None,
-                 n_channels=6,
+                 n_channels=4,  # todo:
                  nx=227,
                  nz=227,
                  labeled=True
@@ -37,18 +36,21 @@ class custom_dset(Dataset):
         self.n_channels = n_channels
         self.img_list = []
         self.label_list = []
-        self.labeled=labeled
+        self.coordinate_list = []
+        self.labeled = labeled
         with open(txt_path, 'r') as f:
             lines = f.readlines()
             # print(len(lines))
             for line in lines:
                 # print(line)
-                if labeled==True:
+                if labeled == True:
                     items = line.split(',')  # .csv
                     self.img_list.append(items[0])
                     self.label_list.append(int(items[1]))
+                    self.coordinate_list.append([int(items[2]), int(items[3]), int(items[4])])
                 else:
                     self.img_list.append(line[:-1])
+                    self.coordinate_list.append([int(items[2]), int(items[3]), int(items[4])])
         self.img_transform = img_transform
 
     def __getitem__(self, index):
@@ -58,15 +60,23 @@ class custom_dset(Dataset):
         # img = self.loader(img_path)
         img = img_path
         img = self._xshow(img)
+        coordinate = self.coordinate_list[index]
+        coordinate = self._cshow(coordinate)
         if self.img_transform is not None:
             self.img_transform()
         if self.labeled:
-            return img, label
+            return img, label, coordinate
         else:
             return img
 
     def __len__(self):
         return len(self.img_list)
+
+    def _cshow(self, coordinate):
+        coor = np.zeros(3)
+        for i in range(3):
+            coor[i] = int(coordinate[i])
+        return coor
 
     def _xshow(self, filename):
         nx = self.nx
