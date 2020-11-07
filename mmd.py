@@ -86,18 +86,23 @@ def guassian_kernel_one_loop(source, target, kernel_mul=2.0, kernel_num=5, fix_s
 def distance_kernel(source, target):
     n_samples = int(source.size()[0]) + int(target.size()[0])
     total = torch.cat([source, target], dim=0)
-    total = (total - total.mean()) / total.std()
-    #positive definite
-    a = torch.rand(3, 1)
-    epsilon = 0.01 * torch.eye(3)
-    Sigma = Variable(((a.t()*a)+epsilon).cuda())
+    # total = (total - total.mean()) / total.std()
+    # positive definite
+    a = Variable(torch.rand(3, 1), requires_grad=True)
+    epsilon = Variable(0.01 * torch.eye(3))
+    Sigma = ((a.t() * a) + epsilon).cuda()
     k_dist = torch.zeros(int(total.size(0)), int(total.size(0))).cuda()
     k_dist = Variable(k_dist)
     for i in range(total.size()[0]):
         for j in range(total.size()[0]):
-            gaussian = torch.matmul((total[i, :] - total[j, :]).view(1, 3), Sigma)
-            gaussian = torch.matmul(gaussian, (total[i, :] - total[j, :]).view(3, 1))
-            gaussian = torch.exp(-gaussian)
+            diff = total[i, :] - total[j, :]
+            if diff.data.std() != 0:
+                diff = (diff - diff.mean()) / diff.std()
+                gaussian = torch.matmul(diff.view(1, 3), Sigma)
+                gaussian = torch.matmul(gaussian, diff.view(3, 1))
+                gaussian = torch.exp(-gaussian)
+            else:
+                gaussian = torch.zeros(1)
             k_dist[i, j] = gaussian
     return k_dist
 
