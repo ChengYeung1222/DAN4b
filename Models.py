@@ -278,7 +278,9 @@ class DAN_with_Alex(nn.Module):  # todo
         self.l7 = alexnet().classifier[3]
         self.cls4 = alexnet().classifier[4]
         self.l8 = alexnet().classifier[5]
-        self.cls_fc = nn.Linear(2048, num_classes)  # todo:4096
+        # ++++++++++
+        # self.cls_fc = nn.Linear(2050, num_classes)  # todo:4096
+        self.cls_fc = nn.Linear(2048, num_classes)
 
     def forward(self, source, target, coordinate_source, coordinate_target, heterogeneity, fd_kernel=False):
         loss = .0
@@ -324,6 +326,9 @@ class DAN_with_Alex(nn.Module):  # todo
             # !!!!!!!!
             loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i,
                                              heterogeneity)  # todo:wommd
+        # +++++++++++
+        # new_features = Variable(torch.rand(256, 2), requires_grad=True).cuda()
+        # source = torch.cat((source, new_features), dim=1)
         source = self.cls_fc(source)
         # if self.training == True:
         #     target = alexnet().classifier[6](target)
