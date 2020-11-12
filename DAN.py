@@ -437,7 +437,7 @@ if __name__ == '__main__':
         model.cuda()
     model = load_pretrain_alex(model, alexnet_model=True)
     for epoch in range(1, epochs + 1):
-        train(epoch, model, heterogeneity=True)  # TODO
+        train(epoch, model, heterogeneity=False)  # TODO
         t_correct = test(epoch, model)
         # Save models.
         ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
