@@ -102,7 +102,7 @@ def distance_kernel(source, target):
                 gaussian = torch.matmul(gaussian, diff.view(3, 1))
                 gaussian = torch.exp(-gaussian)
             else:
-                gaussian = torch.zeros(1)
+                gaussian = torch.exp(-diff)
             k_dist[i, j] = gaussian
     return k_dist
 
