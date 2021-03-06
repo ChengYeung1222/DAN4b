@@ -1,3 +1,6 @@
+#!/usr/bin/env Python
+# coding=utf-8
+
 from __future__ import print_function
 from datetime import datetime
 import argparse
@@ -23,6 +26,8 @@ import numpy as np
 import logging
 import time
 
+np.seterr(divide='ignore', invalid='ignore')
+
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 # logging.basicConfig(level=logging.DEBUG,format='%(asctime)s-%(levelname)s-%(message)s')
@@ -46,28 +51,29 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'DYGZ_DAN_Alex_500')  # todo
+vis = visdom.Visdom(env=u'ssd_DAN_Alex_1500')  # todo
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo
 epochs = 50  # depth: 1500 epoch: 48  auc: 0.928#todo
-lr = 1e-4  # todo:1e-4,1e-3
+lr = 1e-3  # todo:1e-4,1e-3
 momentum = 0.9
 no_cuda = False
-seed = 5  # todo
-log_interval = 33  # 20
-log_interval_test = 3  # 30
-l2_decay = 1e-5  # todo:5e-4,1e-3,5e-3
+seed = 5  # todo:5,38;8,50;1, 26;2,2
+# todo: dygz,32:1;ssd: 30, 11
+log_interval = 30  # 20
+log_interval_test = 11  # 30
+l2_decay = 1e-3  # todo:5e-4,1e-3,5e-3
 root_path = "./"
-source_list = "./depth_1500/DYGZ_shallow_1500.csv"
-target_list = "./depth_1500/DYGZ_deep_1500.csv"  # todo: 70500
-validation_list = './depth_1500/DYGZ_deep_1500.csv'
+source_list = "./ssd/ssd_shallow_s.csv"
+target_list = "./ssd/ssd_deep_s.csv"  # todo: 70500
+validation_list = './ssd/ssd_deep_s.csv'
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
-ckpt_path = './ckpt_d1500/'  # todo:wommd
+ckpt_path = './ckpt_d1500_ssd/'  # todo:wommd
 ckpt_model = './ckpt/model_epoch1.pth'
 
 # Create parent path if it doesn't exist
@@ -159,7 +165,7 @@ def load_pretrain(model, resnet_model=True):
     return model
 
 
-def train(epoch, model, heterogeneity, optimizer_arg='radam'):
+def train(epoch, model, heterogeneity, optimizer_arg='radam', blending=True):
     LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
@@ -212,12 +218,14 @@ def train(epoch, model, heterogeneity, optimizer_arg='radam'):
     num_iter = max(len_source_loader, len_target_loader)  # 88
     TP, TN, FN, FP = 0, 0, 0, 0
     for i in range(1, num_iter):
+        if i == 2:
+            print(i)
         logging.debug('Start %dth iteration...' % (i))
         print('Start %dth iteration...' % (i))
         logging.debug('data_source, label_source = next(iter_source)')
-        data_source, label_source, coordinate_source = next(iter_source)
+        data_source, label_source, coordinate_source, fluid_source = next(iter_source)
         logging.debug('data_target, _ = next(iter_target)')
-        data_target, _, coordinate_target = next(iter_target)
+        data_target, _, coordinate_target, fluid_target = next(iter_target)
         logging.debug('if i % len_target_loader == 0:')
         if len_source_dataset < len_target_dataset:
             if i % len_source_loader == 0:
@@ -230,33 +238,58 @@ def train(epoch, model, heterogeneity, optimizer_arg='radam'):
         logging.debug('if cuda:')
         if cuda:
             logging.debug('push source data to gpu')
-            data_source, label_source, coordinate_source = data_source.cuda(), label_source.cuda(), coordinate_source.cuda()
+            data_source, label_source, coordinate_source, fluid_source = data_source.cuda(), label_source.cuda(), coordinate_source.cuda(), fluid_source.cuda()
             logging.debug('push target data to gpu')
-            data_target, coordinate_target = data_target.cuda(), coordinate_target.cuda()
+            data_target, coordinate_target, fluid_target = data_target.cuda(), coordinate_target.cuda(), fluid_target.cuda()
 
         logging.debug('Variable source data')
-        data_source, label_source, coordinate_source = Variable(data_source.float()), Variable(
-            label_source.long()), Variable(coordinate_source.float())
+        data_source, label_source, coordinate_source, fluid_source = Variable(data_source.float()), Variable(
+            label_source.long()), Variable(coordinate_source.float()), Variable(fluid_source.float())
         logging.debug('Variable target data')
-        data_target, coordinate_target = Variable(data_target.float()), Variable(coordinate_target.float())
+        data_target, coordinate_target, fluid_target = Variable(data_target.float()), Variable(
+            coordinate_target.float()), Variable(fluid_target.float())
 
         logging.debug('clear old gradients from the last step')
         optimizer.zero_grad()
 
-        score_source_pred, loss_mmd = model(data_source, data_target, coordinate_source, coordinate_target,
-                                            heterogeneity)  # todo
+        score_source_pred, loss_mmd, new_feature_pred = model(data_source, data_target, coordinate_source,
+                                                              coordinate_target, fluid_source, fluid_target,
+                                                              heterogeneity=heterogeneity, blending=blending)  # todo
         logging.debug('Calculating loss_cls...')
-        prob_source_pred = F.softmax(score_source_pred, dim=1)
-        y_1 = prob_source_pred[:, 1]
-        y_0 = prob_source_pred[:, 0]
-        ratio_source = y_1 / y_0 * len_source_zeros / len_source_ones
-        prob_source_pred_new = torch.Tensor(prob_source_pred.size()).cuda()
-        prob_source_pred_new[:, 1] = ratio_source.data / (ratio_source.data + 1)
-        prob_source_pred_new[:, 0] = 1 / (ratio_source.data + 1)
-        prob_source_pred_new = Variable(prob_source_pred_new)
 
-        loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
-                              target=label_source)  # the negative log likelihood loss
+        # softmax_score = F.softmax(score_source_pred, dim=1)  # todo: parallel
+        if blending == True:
+            # print(new_feature_pred)
+            prob_source_pred = F.softmax(new_feature_pred, dim=1)
+            y_1 = prob_source_pred[:, 1]
+            y_0 = prob_source_pred[:, 0]
+            ratio_source = y_1 / y_0 * len_source_zeros / len_source_ones
+            prob_source_pred_new = torch.Tensor(prob_source_pred.size()).cuda()
+            prob_source_pred_new[:, 1] = ratio_source.data / (ratio_source.data + 1)
+            prob_source_pred_new[:, 0] = 1 / (ratio_source.data + 1)
+            prob_source_pred_new = Variable(prob_source_pred_new)
+            # softmax_new_feature = F.softmax(new_feature_pred, dim=1).cuda()
+            # blending_softmax = 0.6 * softmax_score + 0.4 * softmax_new_feature
+            # blending_log_softmax = torch.log(blending_softmax)
+            # loss_cls = F.nll_loss(F.log_softmax(blending_log_softmax, dim=1),
+            #                       target=label_source)
+            blending_softmax = F.log_softmax(new_feature_pred, dim=1)
+            # print('blending_softmax:')
+            # print(blending_softmax)
+            loss_cls = F.nll_loss(F.log_softmax(new_feature_pred, dim=1),
+                                  target=label_source)
+        else:
+            prob_source_pred = F.softmax(score_source_pred, dim=1)
+            y_1 = prob_source_pred[:, 1]
+            y_0 = prob_source_pred[:, 0]
+            ratio_source = y_1 / y_0 * len_source_zeros / len_source_ones
+            prob_source_pred_new = torch.Tensor(prob_source_pred.size()).cuda()
+            prob_source_pred_new[:, 1] = ratio_source.data / (ratio_source.data + 1)
+            prob_source_pred_new[:, 0] = 1 / (ratio_source.data + 1)
+            prob_source_pred_new = Variable(prob_source_pred_new)
+            loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
+                                  target=label_source)  # the negative log likelihood loss
+            logging.debug('loss_cls = %s' % (loss_cls))
         gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper#todo:denominator: epochs
         logging.debug('Push mmd to gpu...')
         # !!!!
@@ -342,7 +375,7 @@ def train(epoch, model, heterogeneity, optimizer_arg='radam'):
                 loss_mmd.data[0]))
 
 
-def test(epoch, model):
+def test(epoch, model, heterogeneity, blending):
     model.eval()
 
     test_loss = 0
@@ -354,12 +387,16 @@ def test(epoch, model):
     num_iter_test = len_test_loader
 
     for i in range(1, num_iter_test):
-        data, label = next(iter_test)  # data_shape: torch.Size([32, 3, 224, 224])
-        data, label = data.float(), label.long()
+        data, label, coordinate_target, fluid_target = next(iter_test)  # data_shape: torch.Size([32, 3, 224, 224])
+        data, label, fluid_target = data.float(), label.long(), fluid_target.float()
         if cuda:
-            data, label = data.cuda(), label.cuda()
-        data, label = Variable(data, volatile=True), Variable(label)
-        s_output, _ = model(data, data)
+            data, label, fluid_target = data.cuda(), label.cuda(), fluid_target.cuda()
+        data, label, fluid_target = Variable(data, volatile=True), Variable(label), Variable(fluid_target)
+        s_output, _, new_feature_pred = model(data, data, coordinate_target, coordinate_target, fluid_target,
+                                              fluid_target,
+                                              heterogeneity=heterogeneity,
+                                              blending=blending)
+
         prob_val_pred = F.softmax(s_output, dim=1)
         y_1 = prob_val_pred[:, 1]
         y_0 = prob_val_pred[:, 0]
@@ -368,8 +405,15 @@ def test(epoch, model):
         prob_val_pred_new[:, 1] = ratio_val.data / (ratio_val.data + 1)
         prob_val_pred_new[:, 0] = 1 / (ratio_val.data + 1)
         prob_val_pred_new = Variable(prob_val_pred_new)
-        test_loss += F.nll_loss(F.log_softmax(s_output, dim=1), label, size_average=False).data[0]  # sum up batch loss
-        loss_val = F.nll_loss(F.log_softmax(s_output, dim=1), label).data[0]
+        if blending == True:
+            test_loss += F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label, size_average=False).data[
+                0]  # sum up batch loss
+            loss_val = F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label).data[0]
+
+        else:
+            test_loss += F.nll_loss(F.log_softmax(s_output, dim=1), label, size_average=False).data[
+                0]  # sum up batch loss
+            loss_val = F.nll_loss(F.log_softmax(s_output, dim=1), label).data[0]
         pred = prob_val_pred_new.data.max(1)[
             1]  # get the index of the max log-probability, s_output_shape: torch.Size([32, 31])
         correct += pred.eq(label.data.view_as(pred)).cpu().sum()
@@ -437,8 +481,8 @@ if __name__ == '__main__':
         model.cuda()
     model = load_pretrain_alex(model, alexnet_model=True)
     for epoch in range(1, epochs + 1):
-        train(epoch, model, heterogeneity=False)  # TODO
-        t_correct = test(epoch, model)
+        train(epoch, model, heterogeneity=False, blending=True)  # TODO
+        t_correct = test(epoch, model, heterogeneity=False, blending=True)
         # Save models.
         ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
         print('Save model: {}'.format(ckpt_name))
