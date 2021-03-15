@@ -182,12 +182,31 @@ class ResNet(nn.Module):
         return x
 
 
+class new_Net(nn.Module):
+    def __init__(self, num_classes=2):
+        super(new_Net, self).__init__()
+        self.classifier = nn.Sequential(
+            nn.Linear(6, 50),
+            nn.ReLU(inplace=True),
+            # todo
+            nn.Linear(50, 50),
+            nn.ReLU(inplace=True),
+            # nn.Linear(8, num_classes),
+            nn.Linear(50, 50),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        x = self.classifier(x)
+        return x
+
+
 class AlexNet(nn.Module):
 
-    def __init__(self, num_classes=1000):
+    def __init__(self, num_classes=2):
         super(AlexNet, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(4, 64, kernel_size=11, stride=4, padding=2),  # todo
+            nn.Conv2d(5, 64, kernel_size=11, stride=4, padding=2),  # todo
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
             # CrossMapLRN(5, 0.0001, 0.75),#todo
@@ -208,13 +227,18 @@ class AlexNet(nn.Module):
             self.classifier = nn.Sequential(
 
                 nn.Dropout(0.5),  # todo
-                nn.Linear(256 * 6 * 6, 2048),
+                nn.Linear(256 * 6 * 6, 4096),
                 nn.ReLU(inplace=True),
 
                 nn.Dropout(0.5),  # todo:0.5,0.7
-                nn.Linear(2048, 2048),  # todo:4096
+                nn.Linear(4096, 4096),  # todo:4096
                 nn.ReLU(inplace=True),
-                nn.Linear(2048, num_classes),  # todo:2048
+                nn.Linear(4096, num_classes),  # todo:2048
+
+                nn.Linear(4096, 50),  # todo:parallel
+                nn.ReLU(inplace=True),
+                nn.Linear(50, num_classes),
+
             )
         else:
             self.classifier = nn.Sequential(
@@ -222,7 +246,9 @@ class AlexNet(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.Linear(4096, 4096),
                 nn.ReLU(inplace=True),
-                nn.Linear(4096, num_classes),
+                nn.Linear(4096, 50),
+                nn.ReLU(inplace=True),
+                nn.Linear(50, num_classes),
             )
 
     def forward(self, x):
@@ -263,7 +289,7 @@ class AlexNetFc(nn.Module):
 #             nn.ReLU(inplace=True),
 #             nn.Linear(4096, num_classes),
 #         )
-class DAN_with_Alex(nn.Module):  # todo
+class DAN_with_Alex(nn.Module):
 
     def __init__(self, num_classes=2):
         super(DAN_with_Alex, self).__init__()
@@ -279,30 +305,47 @@ class DAN_with_Alex(nn.Module):  # todo
         self.cls4 = alexnet().classifier[4]
         self.l8 = alexnet().classifier[5]
         # ++++++++++
-        # self.cls_fc = nn.Linear(2050, num_classes)  # todo:4096
-        self.cls_fc = nn.Linear(2048, num_classes)
+        self.cls_fc = nn.Linear(4096, num_classes)  # todo:parallel
 
-    def forward(self, source, target, coordinate_source, coordinate_target, heterogeneity, fd_kernel=False):
+        # self.cls_fc = nn.Linear(2048, num_classes)
+
+    def forward(self, source, target, coordinate_source, coordinate_target, fluid_source, fluid_target, heterogeneity,
+                blending=True):
+        # fd_kernel=False):
         loss = .0
         # if heterogeneity == True:
         #     kernel_dist = mmd.distance_kernel(coordinate_source, coordinate_target)
 
-        kernel_i = mmd.guassian_kernel_no_loop(
-            source.data.view(source.shape[0], source.shape[1] * source.shape[2] * source.shape[3]),
-            target.data.view(target.shape[0], target.shape[1] * target.shape[2] * target.shape[3]))
+        # kernel_i = mmd.guassian_kernel_no_loop(
+        #     source.data.view(source.shape[0], source.shape[1] * source.shape[2] * source.shape[3]),
+        #     target.data.view(target.shape[0], target.shape[1] * target.shape[2] * target.shape[3]))
         # source=self.conv1(source)
-        source = self.features(source)
+        source = self.features(source)  # todo:nmdwsm
         source = source.view(source.size(0), 256 * 6 * 6)
 
+        # target=self.conv1(target)
+        if blending == True:
+            # new_features = Variable(torch.rand(256, 8), requires_grad=True)  # todo: parallel
+            new_features = fluid_source
+            # new_net().cuda()
+            new_features = new_net().cuda().classifier[0](new_features)  # todo:parallel
+            new_features = new_net().cuda().classifier[1](new_features)
+        else:
+            new_features = 0.
+
+        source = self.l6(source)
         if self.training == True:
-            # target=self.conv1(target)
-            source = self.l6(source)
             target = self.features(target)
             target = target.view(target.size(0), 256 * 6 * 6)
             target = self.l6(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i,
-                                             heterogeneity)  # todo: add mmd
+            # if loss == 0.:#todo
+            #     pass
+            # else:
+            if blending != True:
+                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                                                 heterogeneity=heterogeneity)  # todo: add mmd
+            logging.debug('kernel loss = %s' % (loss))
         self.cls1.cuda()
         self.cls2.cuda()
         source = self.cls1(source)
@@ -310,29 +353,63 @@ class DAN_with_Alex(nn.Module):  # todo
         if self.training == True:
             target = self.cls1(target)
             target = self.cls2(target)
-            source = self.l7(source)
+        source = self.l7(source)
+        if blending == True:
+            new_features = new_net().cuda().classifier[2](new_features)  # todo:parallel
+            new_features = new_net().cuda().classifier[3](new_features)
+        if self.training == True:
             target = self.l7(target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i,
-                                             heterogeneity)  # todo
+            if blending != True:
+                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                                                 heterogeneity=heterogeneity)  # todo
+            logging.debug('kernel loss = %s' % (loss))
         self.cls4.cuda()
         source = self.cls4(source)
         if self.training == True:
             target = self.l7(target)
             target = self.cls4(target)
         source = self.l8(source)
+        if blending == True:
+            source = alexnet().cuda().classifier[7](source)
+            source = alexnet().cuda().classifier[8](source)
+
+        # self.l8 = alexnet().classifier[5]  # 7,8,9
+
         if self.training == True:
-            target = self.l8(target)
+            target = self.l8(target)  # relu
+            if blending == True:
+                target = alexnet().cuda().classifier[7](target)
+                target = alexnet().cuda().classifier[8](target)
             # !!!!!!!!
-            loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i,
-                                             heterogeneity)  # todo:wommd
+            if blending != True:
+                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                                                 heterogeneity=heterogeneity)  # todo:wommd
+            logging.debug('kernel loss = %s' % (loss))
         # +++++++++++
-        # new_features = Variable(torch.rand(256, 2), requires_grad=True).cuda()
+        # new_features = Variable(torch.rand(256, 2), requires_grad=True).cuda()  # todo: parallel
         # source = torch.cat((source, new_features), dim=1)
-        source = self.cls_fc(source)
+        if blending == True:
+            new_features = new_net().cuda().classifier[4](new_features)  # todo:parallel
+            new_features = new_net().cuda().classifier[5](new_features)
+            new_cat = torch.cat((source, new_features), dim=1)
+            fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
+            new_cat = fc_out(new_cat)
+        else:
+            source = self.cls_fc(source)
+
         # if self.training == True:
         #     target = alexnet().classifier[6](target)
-        return source, loss
+
+        return source, loss, new_cat
+
+
+def new_net():
+    model = new_Net()
+    for name, params in model.named_parameters():
+        if name.find('classifier') != -1:
+            torch.nn.init.normal(params)
+    return model
 
 
 def alexnet(pretrained=False, frozen=False, **kwargs):

@@ -9,6 +9,7 @@ from torchvision import transforms
 import logging
 import time
 
+
 def default_loader(img):
     return Image.open(img)
 
@@ -26,7 +27,7 @@ class custom_dset(Dataset):
     def __init__(self,
                  txt_path,
                  img_transform=None,
-                 n_channels=4,  # todo:
+                 n_channels=5,  # todo:
                  nx=227,
                  nz=227,
                  labeled=True
@@ -37,6 +38,7 @@ class custom_dset(Dataset):
         self.img_list = []
         self.label_list = []
         self.coordinate_list = []
+        self.fluid_property = []
         self.labeled = labeled
         with open(txt_path, 'r') as f:
             lines = f.readlines()
@@ -48,24 +50,47 @@ class custom_dset(Dataset):
                     self.img_list.append(items[0])
                     self.label_list.append(int(items[1]))
                     self.coordinate_list.append([int(items[2]), int(items[3]), int(items[4])])
+                    self.fluid_property.append([items[i] for i in range(5, 11)])
+                    # fluid = self._fshow(fluid)
+                    # self.arr_fluid_property = self._standardization(self.fluid_property)
                 else:
-                    self.img_list.append(line[:-1])
+                    self.img_list.append(line[0])
                     self.coordinate_list.append([int(items[2]), int(items[3]), int(items[4])])
+                    self.fluid_property.append([items[i] for i in range(5, 11)])
+                    # self.arr_fluid_property = self._standardization(self.fluid_property)
         self.img_transform = img_transform
 
+    def _standardization(self, fp):
+        arr = np.array(fp, dtype=np.float)
+        mean = np.zeros(6)
+        std = np.zeros(6)
+
+        for j in range(6):
+            mean[j] = arr[:, j].mean()
+            std[j] = arr[:, j].std()
+            arr[:, j] = (arr[:, j] - mean[j]) / std[j]
+        return arr
+
     def __getitem__(self, index):
+        # logging.debug('img_path = self.img_list[index]')
         img_path = self.img_list[index]
         if self.labeled:
             label = self.label_list[index]
         # img = self.loader(img_path)
+        # logging.debug('img = img_path')
         img = img_path
         img = self._xshow(img)
         coordinate = self.coordinate_list[index]
         coordinate = self._cshow(coordinate)
+        # logging.debug('fluid = self.fluid_property[index]')
+        # fluid = self.fluid_property[index]
+        # fluid = self._standardization(fluid)
+        fluid = self.fluid_property[index]
+        fluid = self._fshow(fluid)
         if self.img_transform is not None:
             self.img_transform()
         if self.labeled:
-            return img, label, coordinate
+            return img, label, coordinate, fluid
         else:
             return img
 
@@ -76,6 +101,12 @@ class custom_dset(Dataset):
         coor = np.zeros(3)
         for i in range(3):
             coor[i] = int(coordinate[i])
+        return coor
+
+    def _fshow(self, fluid_property):
+        coor = np.zeros(6)
+        for i in range(6):
+            coor[i] = fluid_property[i]
         return coor
 
     def _xshow(self, filename):
