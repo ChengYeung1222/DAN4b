@@ -310,7 +310,7 @@ class DAN_with_Alex(nn.Module):
         # self.cls_fc = nn.Linear(2048, num_classes)
 
     def forward(self, source, target, coordinate_source, coordinate_target, fluid_source, fluid_target, heterogeneity,
-                blending=True):
+                blending=False, parallel=False, fluid_feature=0.):
         # fd_kernel=False):
         loss = .0
         # if heterogeneity == True:
@@ -342,9 +342,9 @@ class DAN_with_Alex(nn.Module):
             # if loss == 0.:#todo
             #     pass
             # else:
-            if blending != True:
-                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-                                                 heterogeneity=heterogeneity)  # todo: add mmd
+            # if blending != True:
+            # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+            #                                  heterogeneity=heterogeneity)  # todo: add mmd
             logging.debug('kernel loss = %s' % (loss))
         self.cls1.cuda()
         self.cls2.cuda()
@@ -360,9 +360,9 @@ class DAN_with_Alex(nn.Module):
         if self.training == True:
             target = self.l7(target)
             # !!!!!!!!
-            if blending != True:
-                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-                                                 heterogeneity=heterogeneity)  # todo
+            # if blending != True:
+            # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+            #                                  heterogeneity=heterogeneity)  # todo
             logging.debug('kernel loss = %s' % (loss))
         self.cls4.cuda()
         source = self.cls4(source)
@@ -382,21 +382,26 @@ class DAN_with_Alex(nn.Module):
                 target = alexnet().cuda().classifier[7](target)
                 target = alexnet().cuda().classifier[8](target)
             # !!!!!!!!
-            if blending != True:
-                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-                                                 heterogeneity=heterogeneity)  # todo:wommd
+            # if blending != True:
+            # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+            #                                  heterogeneity=heterogeneity)  # todo:wommd
             logging.debug('kernel loss = %s' % (loss))
         # +++++++++++
         # new_features = Variable(torch.rand(256, 2), requires_grad=True).cuda()  # todo: parallel
         # source = torch.cat((source, new_features), dim=1)
-        if blending == True:
-            new_features = new_net().cuda().classifier[4](new_features)  # todo:parallel
-            new_features = new_net().cuda().classifier[5](new_features)
-            new_cat = torch.cat((source, new_features), dim=1)
+        # if blending == True:
+        #     new_features = new_net().cuda().classifier[4](new_features)  # todo:parallel
+        #     new_features = new_net().cuda().classifier[5](new_features)
+        #     new_cat = torch.cat((source, new_features), dim=1)
+        #     fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
+        #     new_cat = fc_out(new_cat)
+        if parallel==True:
+            new_cat=torch.cat((source,fluid_feature),dim=1)
             fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
             new_cat = fc_out(new_cat)
         else:
             source = self.cls_fc(source)
+            new_cat=0.
 
         # if self.training == True:
         #     target = alexnet().classifier[6](target)

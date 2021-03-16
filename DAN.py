@@ -51,20 +51,20 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'ssd_DAN_Alex_1500')  # todo
+vis = visdom.Visdom(env=u'ssdparallelpre_Alex_1500')  # todo
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo
 epochs = 50  # depth: 1500 epoch: 48  auc: 0.928#todo
-lr = 1e-3  # todo:1e-4,1e-3
+lr = 1e-6  # todo:1e-4,1e-3,5e-4,1e-5
 momentum = 0.9
 no_cuda = False
 seed = 5  # todo:5,38;8,50;1, 26;2,2
 # todo: dygz,32:1;ssd: 30, 11
 log_interval = 30  # 20
-log_interval_test = 11  # 30
+log_interval_test = 17  # 30
 l2_decay = 1e-3  # todo:5e-4,1e-3,5e-3
 root_path = "./"
 source_list = "./ssd/ssd_shallow_s.csv"
@@ -73,8 +73,9 @@ validation_list = './ssd/ssd_deep_s.csv'
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
-ckpt_path = './ckpt_d1500_ssd/'  # todo:wommd
-ckpt_model = './ckpt/model_epoch1.pth'
+ckpt_path = './ckpt_d1500_ssd_parallelpre/'  # todo:wommd
+ckpt_model = './ckpt_d1500_ssd_parallelpre/model_epoch1.pth'
+parallel = False
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -165,7 +166,7 @@ def load_pretrain(model, resnet_model=True):
     return model
 
 
-def train(epoch, model, heterogeneity, optimizer_arg='radam', blending=True):
+def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='radam', blending=True):
     LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
@@ -251,14 +252,19 @@ def train(epoch, model, heterogeneity, optimizer_arg='radam', blending=True):
 
         logging.debug('clear old gradients from the last step')
         optimizer.zero_grad()
+        if parallel == True:
+            fluid_feature = model_mlp(fluid_source)
+        else:
+            fluid_feature = 0.
 
         score_source_pred, loss_mmd, new_feature_pred = model(data_source, data_target, coordinate_source,
                                                               coordinate_target, fluid_source, fluid_target,
-                                                              heterogeneity=heterogeneity, blending=blending)  # todo
+                                                              heterogeneity=heterogeneity, blending=blending,
+                                                              parallel=parallel, fluid_feature=fluid_feature)  # todo
         logging.debug('Calculating loss_cls...')
 
         # softmax_score = F.softmax(score_source_pred, dim=1)  # todo: parallel
-        if blending == True:
+        if parallel == True or blending == True:
             # print(new_feature_pred)
             prob_source_pred = F.softmax(new_feature_pred, dim=1)
             y_1 = prob_source_pred[:, 1]
@@ -375,7 +381,7 @@ def train(epoch, model, heterogeneity, optimizer_arg='radam', blending=True):
                 loss_mmd.data[0]))
 
 
-def test(epoch, model, heterogeneity, blending):
+def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
     model.eval()
 
     test_loss = 0
@@ -392,10 +398,15 @@ def test(epoch, model, heterogeneity, blending):
         if cuda:
             data, label, fluid_target = data.cuda(), label.cuda(), fluid_target.cuda()
         data, label, fluid_target = Variable(data, volatile=True), Variable(label), Variable(fluid_target)
+        if parallel == True:
+            fluid_feature = model_mlp(fluid_target)
+        else:
+            fluid_feature = 0.
+
         s_output, _, new_feature_pred = model(data, data, coordinate_target, coordinate_target, fluid_target,
                                               fluid_target,
                                               heterogeneity=heterogeneity,
-                                              blending=blending)
+                                              blending=blending, parallel=parallel, fluid_feature=fluid_feature)
 
         prob_val_pred = F.softmax(s_output, dim=1)
         y_1 = prob_val_pred[:, 1]
@@ -405,7 +416,7 @@ def test(epoch, model, heterogeneity, blending):
         prob_val_pred_new[:, 1] = ratio_val.data / (ratio_val.data + 1)
         prob_val_pred_new[:, 0] = 1 / (ratio_val.data + 1)
         prob_val_pred_new = Variable(prob_val_pred_new)
-        if blending == True:
+        if parallel == True or blending == True:
             test_loss += F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label, size_average=False).data[
                 0]  # sum up batch loss
             loss_val = F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label).data[0]
@@ -472,21 +483,40 @@ def test(epoch, model, heterogeneity, blending):
     return correct
 
 
+def load_ckpt(model):
+    model.load_state_dict(torch.load(ckpt_model))
+    return model
+
+
 if __name__ == '__main__':
     # model = models.DANNet(num_classes=2)  # Models.py#todo:ResNet
     model = models.DAN_with_Alex(num_classes=2)
-    correct = 0
     print(model)
+    if parallel == True:
+        model_mlp = models.new_net()
+    else:
+        model_mlp = None
+        print(model_mlp)
+    correct = 0
+
     if cuda:
         model.cuda()
+        if parallel == True:
+            model_mlp.cuda()
     model = load_pretrain_alex(model, alexnet_model=True)
+    if parallel == True:
+        model = load_ckpt(model)
     for epoch in range(1, epochs + 1):
-        train(epoch, model, heterogeneity=False, blending=True)  # TODO
-        t_correct = test(epoch, model, heterogeneity=False, blending=True)
+        train(epoch, model, model_mlp=model_mlp, heterogeneity=False, blending=False)  # TODO
+        t_correct = test(epoch, model, model_mlp=model_mlp, heterogeneity=False, blending=False)
         # Save models.
         ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
         print('Save model: {}'.format(ckpt_name))
         torch.save(obj=model.state_dict(), f=ckpt_name)
+        if parallel == True:
+            ckpt_name_mlp = os.path.join(ckpt_path, 'model_epoch_mlp' + str(epoch) + '.pth')
+            print('Save model: {}'.format(ckpt_name_mlp))
+            torch.save(obj=model_mlp.state_dict(), f=ckpt_name_mlp)
         if t_correct > correct:
             correct = t_correct
         current_acc = 100. * t_correct / len_test_dataset
