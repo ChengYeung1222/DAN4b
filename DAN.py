@@ -51,7 +51,7 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'ssdparallelpre_Alex_1500')  # todo
+vis = visdom.Visdom(env=u'ssdparallel_Alex_1500')  # todo
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -73,9 +73,9 @@ validation_list = './ssd/ssd_deep_s.csv'
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
-ckpt_path = './ckpt_d1500_ssd_parallelpre/'  # todo:wommd
-ckpt_model = './ckpt_d1500_ssd_parallelpre/model_epoch1.pth'
-parallel = False
+ckpt_path = './ckpt_d1500_ssd_parallel/'  # todo:wommd
+ckpt_model = './ckpt_d1500_ssd_parallelpre/model_epoch50.pth'
+parallel = True
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -388,6 +388,7 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
     correct = 0
     TP, TN, FN, FP = 0, 0, 0, 0
     F1score = 0
+    auc_test_all = 0.
 
     iter_test = iter(target_test_loader)
     num_iter_test = len_test_loader
@@ -440,6 +441,7 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
         #     tpr=np.full(shape=tpr.shape,fill_value=1e-8)
 
         auc_value_test = metrics.auc(fpr, tpr)  # todo
+        auc_test_all += auc_value_test
         TP += ((pred == 1) & (label.data.view_as(pred) == 1)).cpu().sum()
         TN += ((pred == 0) & (label.data.view_as(pred) == 0)).cpu().sum()
         FN += ((pred == 0) & (label.data.view_as(pred) == 1)).cpu().sum()
@@ -476,9 +478,10 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
                      opts={'title': 'testing loss'})
 
     test_loss /= len_test_dataset
+    auc_test_all /= num_iter_test
     print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}, auc: {}\n'.format(
         datetime.now(), test_name, test_loss, correct, len_test_dataset,
-        100. * correct / len_test_dataset, F1score, auc_value_test))
+        100. * correct / len_test_dataset, F1score, auc_test_all))
 
     return correct
 
@@ -494,9 +497,10 @@ if __name__ == '__main__':
     print(model)
     if parallel == True:
         model_mlp = models.new_net()
+        print(model_mlp)
     else:
         model_mlp = None
-        print(model_mlp)
+
     correct = 0
 
     if cuda:

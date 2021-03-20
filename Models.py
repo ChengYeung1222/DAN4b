@@ -186,9 +186,9 @@ class new_Net(nn.Module):
     def __init__(self, num_classes=2):
         super(new_Net, self).__init__()
         self.classifier = nn.Sequential(
-            nn.Linear(6, 50),
+            nn.Linear(6, 50),  # todo
             nn.ReLU(inplace=True),
-            # todo
+
             nn.Linear(50, 50),
             nn.ReLU(inplace=True),
             # nn.Linear(8, num_classes),
@@ -395,13 +395,15 @@ class DAN_with_Alex(nn.Module):
         #     new_cat = torch.cat((source, new_features), dim=1)
         #     fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
         #     new_cat = fc_out(new_cat)
-        if parallel==True:
-            new_cat=torch.cat((source,fluid_feature),dim=1)
+        if parallel == True:
+            source = alexnet().cuda().classifier[7](source)
+            source = alexnet().cuda().classifier[8](source)
+            new_cat = torch.cat((source, fluid_feature), dim=1)
             fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
             new_cat = fc_out(new_cat)
         else:
             source = self.cls_fc(source)
-            new_cat=0.
+            new_cat = 0.
 
         # if self.training == True:
         #     target = alexnet().classifier[6](target)
