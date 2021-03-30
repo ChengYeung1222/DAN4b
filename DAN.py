@@ -51,20 +51,20 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'ssdparallel_Alex_1500')  # todo
+vis = visdom.Visdom(env=u'ssdparallelmlp_Alex_1500')  # todo
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo
 epochs = 50  # depth: 1500 epoch: 48  auc: 0.928#todo
-lr = 1e-6  # todo:1e-4,1e-3,5e-4,1e-5
+lr = 1e-5  # todo:1e-4,1e-3,5e-4,1e-5
 momentum = 0.9
 no_cuda = False
 seed = 5  # todo:5,38;8,50;1, 26;2,2
 # todo: dygz,32:1;ssd: 30, 11
-log_interval = 30  # 20
-log_interval_test = 17  # 30
+log_interval = 30 # 30,20
+log_interval_test = 17  # 17,30
 l2_decay = 1e-3  # todo:5e-4,1e-3,5e-3
 root_path = "./"
 source_list = "./ssd/ssd_shallow_s.csv"
@@ -73,9 +73,11 @@ validation_list = './ssd/ssd_deep_s.csv'
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
-ckpt_path = './ckpt_d1500_ssd_parallel/'  # todo:wommd
+ckpt_path = './ckpt_d1500_ssd_parallelmlp/'  # todo:wommd
 ckpt_model = './ckpt_d1500_ssd_parallelpre/model_epoch50.pth'
-parallel = True
+ckpt_model_mlp = ''
+parallel = False
+mlp_pre = True
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -187,6 +189,7 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                 {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
                 {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
             ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+        optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE)
 
     elif optimizer_arg == 'radam':
         optimizer = radam.RAdam(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
@@ -199,6 +202,7 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
             {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
             {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
         ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+        optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE)
 
     elif optimizer_arg == 'adamw':
         optimizer = radam.AdamW(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
@@ -211,16 +215,19 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
             {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
             {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
         ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+        optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE)
 
     model.train()
+    if parallel == True or mlp_pre == True:
+        model_mlp.train()
 
     iter_source = iter(source_loader)
     iter_target = iter(target_train_loader)
     num_iter = max(len_source_loader, len_target_loader)  # 88
     TP, TN, FN, FP = 0, 0, 0, 0
     for i in range(1, num_iter):
-        if i == 2:
-            print(i)
+        # if i == 2:
+        #     print(i)
         logging.debug('Start %dth iteration...' % (i))
         print('Start %dth iteration...' % (i))
         logging.debug('data_source, label_source = next(iter_source)')
@@ -252,8 +259,9 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
 
         logging.debug('clear old gradients from the last step')
         optimizer.zero_grad()
-        if parallel == True:
-            fluid_feature = model_mlp(fluid_source)
+        if parallel == True or mlp_pre == True:
+            optimizer_mlp.zero_grad()
+            fluid_feature = model_mlp.features(fluid_source)
         else:
             fluid_feature = 0.
 
@@ -261,9 +269,12 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                                                               coordinate_target, fluid_source, fluid_target,
                                                               heterogeneity=heterogeneity, blending=blending,
                                                               parallel=parallel, fluid_feature=fluid_feature)  # todo
-        logging.debug('Calculating loss_cls...')
+        if mlp_pre == True:
+            fluid_pred = model_mlp.classifier(fluid_feature)
+        logging.debug('Calculating loss...')
 
         # softmax_score = F.softmax(score_source_pred, dim=1)  # todo: parallel
+
         if parallel == True or blending == True:
             # print(new_feature_pred)
             prob_source_pred = F.softmax(new_feature_pred, dim=1)
@@ -284,7 +295,7 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
             # print(blending_softmax)
             loss_cls = F.nll_loss(F.log_softmax(new_feature_pred, dim=1),
                                   target=label_source)
-        else:
+        elif mlp_pre == False:
             prob_source_pred = F.softmax(score_source_pred, dim=1)
             y_1 = prob_source_pred[:, 1]
             y_0 = prob_source_pred[:, 0]
@@ -296,11 +307,24 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
             loss_cls = F.nll_loss(F.log_softmax(score_source_pred, dim=1),
                                   target=label_source)  # the negative log likelihood loss
             logging.debug('loss_cls = %s' % (loss_cls))
+        else:
+            prob_source_pred = F.softmax(fluid_pred, dim=1)
+            y_1 = prob_source_pred[:, 1]
+            y_0 = prob_source_pred[:, 0]
+            ratio_source = y_1 / y_0 * len_source_zeros / len_source_ones
+            prob_source_pred_new = torch.Tensor(prob_source_pred.size()).cuda()
+            prob_source_pred_new[:, 1] = ratio_source.data / (ratio_source.data + 1)
+            prob_source_pred_new[:, 0] = 1 / (ratio_source.data + 1)
+            prob_source_pred_new = Variable(prob_source_pred_new)
+            loss_mlp = F.nll_loss(F.log_softmax(prob_source_pred, dim=1),
+                                  target=label_source)
         gamma = 2 / (1 + math.exp(-10 * (epoch) / epochs)) - 1  # lambda in DAN paper#todo:denominator: epochs
         logging.debug('Push mmd to gpu...')
         # !!!!
 
         # loss_mmd = loss_mmd.cuda()#todo:
+        if mlp_pre == True:
+            loss_cls = 0.
         loss = loss_cls + gamma * loss_mmd
         logging.debug('Calculate total loss')
 
@@ -336,19 +360,31 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
         train_acc = (TP + TN) / (TP + TN + FP + FN)
 
         logging.debug('computing the derivative of the loss w.r.t. the params')
-        loss.backward()
+        if mlp_pre == False:
+            loss.backward()
+        else:
+            loss_mlp.backward()
 
         logging.debug('updating params based on the gradients')
         optimizer.step()
+        if parallel == True or mlp_pre == True:
+            optimizer_mlp.step()
 
         if i % log_interval == 0:
             # opts = dict(xlabel='minibatches',
             #             ylabel='Loss',
             #             title='Training Loss',
             #             legend=['Loss']))
-            vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss_cls.cpu().data.numpy(), win='loss_cls',
-                     update='append',
-                     opts={'title': 'CNN risk'})
+            if mlp_pre == False:
+                vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss_cls.cpu().data.numpy(),
+                         win='loss_cls',
+                         update='append',
+                         opts={'title': 'CNN risk'})
+            else:
+                vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss_mlp.cpu().data.numpy(),
+                         win='loss_mlp',
+                         update='append',
+                         opts={'title': 'mlp risk'})
             vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=np.array([gamma]), win='gamma',
                      update='append',
                      opts={'title': 'penalty parameter'})
@@ -383,6 +419,8 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
 
 def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
     model.eval()
+    if parallel == True or mlp_pre == True:
+        model_mlp.eval()
 
     test_loss = 0
     correct = 0
@@ -399,8 +437,8 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
         if cuda:
             data, label, fluid_target = data.cuda(), label.cuda(), fluid_target.cuda()
         data, label, fluid_target = Variable(data, volatile=True), Variable(label), Variable(fluid_target)
-        if parallel == True:
-            fluid_feature = model_mlp(fluid_target)
+        if parallel == True or mlp_pre == True:
+            fluid_feature = model_mlp.features(fluid_target)
         else:
             fluid_feature = 0.
 
@@ -408,24 +446,49 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
                                               fluid_target,
                                               heterogeneity=heterogeneity,
                                               blending=blending, parallel=parallel, fluid_feature=fluid_feature)
+        if mlp_pre == True:
+            fluid_pred = model_mlp.classifier(fluid_feature)
 
-        prob_val_pred = F.softmax(s_output, dim=1)
-        y_1 = prob_val_pred[:, 1]
-        y_0 = prob_val_pred[:, 0]
-        ratio_val = y_1 / y_0 * len_val_zeros / len_val_ones
-        prob_val_pred_new = torch.Tensor(prob_val_pred.size()).cuda()
-        prob_val_pred_new[:, 1] = ratio_val.data / (ratio_val.data + 1)
-        prob_val_pred_new[:, 0] = 1 / (ratio_val.data + 1)
-        prob_val_pred_new = Variable(prob_val_pred_new)
         if parallel == True or blending == True:
             test_loss += F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label, size_average=False).data[
                 0]  # sum up batch loss
             loss_val = F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label).data[0]
+            prob_val_pred = F.softmax(new_feature_pred, dim=1)
+            y_1 = prob_val_pred[:, 1]
+            y_0 = prob_val_pred[:, 0]
+            ratio_val = y_1 / y_0 * len_val_zeros / len_val_ones
+            prob_val_pred_new = torch.Tensor(prob_val_pred.size()).cuda()
+            prob_val_pred_new[:, 1] = ratio_val.data / (ratio_val.data + 1)
+            prob_val_pred_new[:, 0] = 1 / (ratio_val.data + 1)
+            prob_val_pred_new = Variable(prob_val_pred_new)
 
-        else:
+
+        elif mlp_pre == False:
             test_loss += F.nll_loss(F.log_softmax(s_output, dim=1), label, size_average=False).data[
                 0]  # sum up batch loss
             loss_val = F.nll_loss(F.log_softmax(s_output, dim=1), label).data[0]
+            prob_val_pred = F.softmax(s_output, dim=1)
+            y_1 = prob_val_pred[:, 1]
+            y_0 = prob_val_pred[:, 0]
+            ratio_val = y_1 / y_0 * len_val_zeros / len_val_ones
+            prob_val_pred_new = torch.Tensor(prob_val_pred.size()).cuda()
+            prob_val_pred_new[:, 1] = ratio_val.data / (ratio_val.data + 1)
+            prob_val_pred_new[:, 0] = 1 / (ratio_val.data + 1)
+            prob_val_pred_new = Variable(prob_val_pred_new)
+
+        else:
+            test_loss += F.nll_loss(F.log_softmax(fluid_pred, dim=1), label, size_average=False).data[
+                0]  # sum up batch loss
+            loss_val = F.nll_loss(F.log_softmax(fluid_pred, dim=1), label).data[0]
+            prob_val_pred = F.softmax(fluid_pred, dim=1)
+            y_1 = prob_val_pred[:, 1]
+            y_0 = prob_val_pred[:, 0]
+            ratio_val = y_1 / y_0 * len_val_zeros / len_val_ones
+            prob_val_pred_new = torch.Tensor(prob_val_pred.size()).cuda()
+            prob_val_pred_new[:, 1] = ratio_val.data / (ratio_val.data + 1)
+            prob_val_pred_new[:, 0] = 1 / (ratio_val.data + 1)
+            prob_val_pred_new = Variable(prob_val_pred_new)
+
         pred = prob_val_pred_new.data.max(1)[
             1]  # get the index of the max log-probability, s_output_shape: torch.Size([32, 31])
         correct += pred.eq(label.data.view_as(pred)).cpu().sum()
@@ -491,12 +554,19 @@ def load_ckpt(model):
     return model
 
 
+def load_ckpt_mlp(model_mlp):
+    model_mlp.load_state_dict(torch.load(ckpt_model_mlp))
+    return model
+
+
 if __name__ == '__main__':
     # model = models.DANNet(num_classes=2)  # Models.py#todo:ResNet
+
     model = models.DAN_with_Alex(num_classes=2)
     print(model)
-    if parallel == True:
+    if parallel == True or mlp_pre == True:
         model_mlp = models.new_net()
+        model_mlp.classifier = torch.nn.Sequential(torch.nn.Linear(256, 2))
         print(model_mlp)
     else:
         model_mlp = None
@@ -505,19 +575,22 @@ if __name__ == '__main__':
 
     if cuda:
         model.cuda()
-        if parallel == True:
+        if parallel == True or mlp_pre == True:
             model_mlp.cuda()
-    model = load_pretrain_alex(model, alexnet_model=True)
+    if mlp_pre == False:
+        model = load_pretrain_alex(model, alexnet_model=True)
     if parallel == True:
         model = load_ckpt(model)
+        model_mlp = load_ckpt_mlp(model_mlp)
     for epoch in range(1, epochs + 1):
-        train(epoch, model, model_mlp=model_mlp, heterogeneity=False, blending=False)  # TODO
+        # train(epoch, model, model_mlp=model_mlp, heterogeneity=False, blending=False)  # TODO
         t_correct = test(epoch, model, model_mlp=model_mlp, heterogeneity=False, blending=False)
         # Save models.
-        ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
-        print('Save model: {}'.format(ckpt_name))
-        torch.save(obj=model.state_dict(), f=ckpt_name)
-        if parallel == True:
+        if mlp_pre == False:
+            ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
+            print('Save model: {}'.format(ckpt_name))
+            torch.save(obj=model.state_dict(), f=ckpt_name)
+        if parallel == True or mlp_pre == True:
             ckpt_name_mlp = os.path.join(ckpt_path, 'model_epoch_mlp' + str(epoch) + '.pth')
             print('Save model: {}'.format(ckpt_name_mlp))
             torch.save(obj=model_mlp.state_dict(), f=ckpt_name_mlp)

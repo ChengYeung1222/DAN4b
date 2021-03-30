@@ -50,22 +50,22 @@ class custom_dset(Dataset):
                     self.img_list.append(items[0])
                     self.label_list.append(int(items[1]))
                     self.coordinate_list.append([int(items[2]), int(items[3]), int(items[4])])
-                    self.fluid_property.append([items[i] for i in range(5, 11)])#todo
+                    self.fluid_property.append([items[i] for i in range(5, 12)])#todo
                     # fluid = self._fshow(fluid)
                     # self.arr_fluid_property = self._standardization(self.fluid_property)
                 else:
                     self.img_list.append(line[0])
                     self.coordinate_list.append([int(items[2]), int(items[3]), int(items[4])])
-                    self.fluid_property.append([items[i] for i in range(5, 11)])
+                    self.fluid_property.append([items[i] for i in range(5, 12)])
                     # self.arr_fluid_property = self._standardization(self.fluid_property)
         self.img_transform = img_transform
 
     def _standardization(self, fp):
         arr = np.array(fp, dtype=np.float)
-        mean = np.zeros(6)
-        std = np.zeros(6)
+        mean = np.zeros(7)
+        std = np.zeros(7)
 
-        for j in range(6):
+        for j in range(7):
             mean[j] = arr[:, j].mean()
             std[j] = arr[:, j].std()
             arr[:, j] = (arr[:, j] - mean[j]) / std[j]

@@ -185,14 +185,14 @@ class ResNet(nn.Module):
 class new_Net(nn.Module):
     def __init__(self, num_classes=2):
         super(new_Net, self).__init__()
-        self.classifier = nn.Sequential(
-            nn.Linear(6, 50),  # todo
+        self.features = nn.Sequential(
+            nn.Linear(6, 256),  # todo
             nn.ReLU(inplace=True),
 
-            nn.Linear(50, 50),
+            nn.Linear(256, 256),
             nn.ReLU(inplace=True),
             # nn.Linear(8, num_classes),
-            nn.Linear(50, 50),
+            nn.Linear(256, 256),
             nn.ReLU(inplace=True),
         )
 
@@ -235,9 +235,9 @@ class AlexNet(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.Linear(4096, num_classes),  # todo:2048
 
-                nn.Linear(4096, 50),  # todo:parallel
+                nn.Linear(4096, 256),  # todo:parallel
                 nn.ReLU(inplace=True),
-                nn.Linear(50, num_classes),
+                nn.Linear(256, num_classes),
 
             )
         else:
@@ -246,9 +246,9 @@ class AlexNet(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.Linear(4096, 4096),
                 nn.ReLU(inplace=True),
-                nn.Linear(4096, 50),
+                nn.Linear(4096, 256),
                 nn.ReLU(inplace=True),
-                nn.Linear(50, num_classes),
+                nn.Linear(256, num_classes),
             )
 
     def forward(self, x):
