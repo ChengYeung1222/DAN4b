@@ -188,15 +188,19 @@ class new_Net(nn.Module):
         self.features = nn.Sequential(
             nn.Linear(6, 256),  # todo
             nn.ReLU(inplace=True),
+            # nn.Dropout(0.5),#todo
 
             nn.Linear(256, 256),
             nn.ReLU(inplace=True),
             # nn.Linear(8, num_classes),
+            # nn.Dropout(0.5),#todo
             nn.Linear(256, 256),
             nn.ReLU(inplace=True),
         )
+        self.classifier = nn.Sequential(torch.nn.Linear(256, 2))
 
     def forward(self, x):
+        x = self.features(x)
         x = self.classifier(x)
         return x
 
@@ -235,9 +239,11 @@ class AlexNet(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.Linear(4096, num_classes),  # todo:2048
 
-                nn.Linear(4096, 256),  # todo:parallel
-                nn.ReLU(inplace=True),
+                nn.Linear(4096, 256),  # todo:parallel [7]
+                nn.ReLU(inplace=True),  # todo:parallel [8]
                 nn.Linear(256, num_classes),
+                nn.Linear(512, 512),
+                nn.Linear(512, num_classes)
 
             )
         else:
@@ -291,19 +297,23 @@ class AlexNetFc(nn.Module):
 #         )
 class DAN_with_Alex(nn.Module):
 
-    def __init__(self, num_classes=2):
+    def __init__(self, num_classes=2, branch_fixed=False):
         super(DAN_with_Alex, self).__init__()
         # self.conv1=alexnet().features[0]
-        self.features = alexnet().features
+        self.features = alexnet(branch_fixed=branch_fixed).features
         # for i in range(1,13):
         #     exec('self.features{} = alexnet().features[{}]'.format(i, i))
-
-        self.l6 = alexnet().classifier[0]
-        self.cls1 = alexnet().classifier[1]
-        self.cls2 = alexnet().classifier[2]
-        self.l7 = alexnet().classifier[3]
-        self.cls4 = alexnet().classifier[4]
-        self.l8 = alexnet().classifier[5]
+        # self.classifier=alexnet().classifier
+        self.l6 = alexnet(branch_fixed=branch_fixed).classifier[0]
+        self.cls1 = alexnet(branch_fixed=branch_fixed).classifier[1]
+        self.cls2 = alexnet(branch_fixed=branch_fixed).classifier[2]
+        self.l7 = alexnet(branch_fixed=branch_fixed).classifier[3]
+        self.cls4 = alexnet(branch_fixed=branch_fixed).classifier[4]
+        self.l8 = alexnet(branch_fixed=branch_fixed).classifier[5]
+        self.L7 = alexnet(branch_fixed=branch_fixed).classifier[7]
+        self.L9 = alexnet(branch_fixed=branch_fixed).classifier[9]
+        self.L10 = alexnet(branch_fixed=branch_fixed).classifier[10]
+        self.L11 = alexnet(branch_fixed=branch_fixed).classifier[11]
         # ++++++++++
         self.cls_fc = nn.Linear(4096, num_classes)  # todo:parallel
 
@@ -399,8 +409,10 @@ class DAN_with_Alex(nn.Module):
             source = alexnet().cuda().classifier[7](source)
             source = alexnet().cuda().classifier[8](source)
             new_cat = torch.cat((source, fluid_feature), dim=1)
-            fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
-            new_cat = fc_out(new_cat)
+            new_cat = alexnet().cuda().classifier[10](new_cat)
+            new_cat = alexnet().cuda().classifier[11](new_cat)
+            # fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
+            # new_cat = fc_out(new_cat)
         else:
             source = self.cls_fc(source)
             new_cat = 0.
@@ -414,14 +426,27 @@ class DAN_with_Alex(nn.Module):
 def new_net():
     model = new_Net()
     for name, params in model.named_parameters():
-        if name.find('classifier') != -1:
-            torch.nn.init.normal(params)
+        if name.find('weight') != -1:
+            torch.nn.init.kaiming_normal(params)
+        if name.find('bias') != -1:
+            torch.nn.init.constant(params, val=0.)
     return model
 
 
-def alexnet(pretrained=False, frozen=False, **kwargs):
+def alexnet(pretrained=False, frozen=False, branch_fixed=True, **kwargs):
     model = AlexNet()
     for name, params in model.named_parameters():
+        if branch_fixed:
+            if name.find('features') != -1:
+                params.requires_grad = False
+            else:
+                params.requires_grad = False
+                if name.find('7') != -1:
+                    break
+                # count = 0
+                # while (count < 7):
+                #     params.requires_grad = False
+                #     count += 1
         if frozen:  # todo:
             if name.find('3') != -1:
                 params.requires_grad = False
