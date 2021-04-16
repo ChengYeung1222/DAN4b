@@ -437,12 +437,13 @@ def alexnet(pretrained=False, frozen=False, branch_fixed=True, **kwargs):
     model = AlexNet()
     for name, params in model.named_parameters():
         if branch_fixed:
-            if name.find('features') != -1:
-                params.requires_grad = False
-            else:
-                params.requires_grad = False
-                if name.find('7') != -1:
-                    break
+            pass
+            # if name.find('features') != -1:
+            #     params.requires_grad = False
+            # else:
+            #     params.requires_grad = False
+            #     if name.find('7') != -1:
+            #         break
                 # count = 0
                 # while (count < 7):
                 #     params.requires_grad = False

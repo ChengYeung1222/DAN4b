@@ -58,27 +58,27 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 # Training settings
 batch_size = 256  # todo
 epochs = 50  # depth: 1500 epoch: 48  auc: 0.928#todo
-lr = 1e-6  # todo:1e-4,1e-3,5e-4,1e-5
+lr = 1e-5  # todo:1e-4,1e-3,5e-4,1e-5
 momentum = 0.9
 no_cuda = False
 seed = 5  # todo:5,38;8,50;1, 26;2,2
 # todo: dygz,32:1;ssd: 30, 11
 log_interval = 30  # 30,20
 log_interval_test = 17  # 17,30
-l2_decay = 1e-3  # todo:5e-4,1e-3,5e-3
+l2_decay = 5e-4  # todo:5e-4,1e-3,5e-3
 root_path = "./"
-source_list = "./ssd/ssd_shallow_s.csv"
-target_list = "./ssd/ssd_deep_s.csv"  # todo: 70500
-validation_list = './ssd/ssd_deep_s.csv'
+source_list = "./ssd/ssd-list-shallow_s.csv"
+target_list = "./ssd/ssd-list-deep_s.csv"  # todo: 70500
+validation_list = './ssd/ssd-list-deep_s.csv'
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
 ckpt_path = './ckpt_d1500_ssd_parallelmlp/'  # todo:wommd
 ckpt_model = './ckpt_d1500_ssd_parallelpre/model_epoch50.pth'
-ckpt_model_mlp = './ckpt_d1500_ssd_parallelmlp_0401/model_epoch_mlp12.pth'
+ckpt_model_mlp = './ckpt_d1500_ssd_parallelmlp_0401/model_epoch_mlp6.pth'
 parallel = True
 mlp_pre = False
-branch_fixed = False
+branch_fixed = True
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -169,7 +169,7 @@ def load_pretrain(model, resnet_model=True):
     return model
 
 
-def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='Adam', blending=True):  # todo：换优化器
+def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='radam', blending=True):  # todo：换优化器
     LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
@@ -179,7 +179,33 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='Adam
     # ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
     # AlexNet optimizeri;'k
     if branch_fixed:
-        pass
+        if optimizer_arg == 'Adam':
+            optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
+                [
+                    {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
+                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+            optimizer_mlp = torch.optim.Adam(model_mlp.classifier.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+        elif optimizer_arg == 'adamw':
+            optimizer = radam.AdamW(  # filter(lambda p: p.requires_grad,
+                [
+                    {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
+                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+            optimizer_mlp = torch.optim.Adam(model_mlp.classifier.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+        elif optimizer_arg == 'radam':
+            optimizer = radam.RAdam(  # filter(lambda p: p.requires_grad,
+                [
+                    {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
+                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+            optimizer_mlp = torch.optim.Adam(model_mlp.classifier.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
     if parallel:
         if optimizer_arg == 'Adam':
             optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
@@ -621,7 +647,7 @@ def load_ckpt_mlp(model_mlp):
 if __name__ == '__main__':
     # model = models.DANNet(num_classes=2)  # Models.py#todo:ResNet
 
-    model = models.DAN_with_Alex(num_classes=2,branch_fixed=branch_fixed)
+    model = models.DAN_with_Alex(num_classes=2, branch_fixed=branch_fixed)
     print(model)
     if parallel == True or mlp_pre == True:
         model_mlp = models.new_net()
