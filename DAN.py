@@ -51,34 +51,39 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-vis = visdom.Visdom(env=u'ssdparallel_Alex_1500')  # todo
+# vis = visdom.Visdom(env=u'ssdparallelpre_Alex_1500')  # todo
+vis = visdom.Visdom(env=u'dygztransferhete_Alex_1500')  # todo
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo
-epochs = 50  # depth: 1500 epoch: 48  auc: 0.928#todo
-lr = 1e-5  # todo:1e-4,1e-3,5e-4,1e-5
+epochs = 25  # depth: 1500 epoch: 48  auc: 0.928#todo
+lr = 1e-5  # todo:3e-5(0728)
 momentum = 0.9
 no_cuda = False
 seed = 5  # todo:5,38;8,50;1, 26;2,2
 # todo: dygz,32:1;ssd: 30, 11
-log_interval = 30  # 30,20
-log_interval_test = 17  # 17,30
-l2_decay = 5e-4  # todo:5e-4,1e-3,5e-3
+log_interval = 31  # ssd30,20
+log_interval_test = 5  # ssd17,30
+l2_decay = 5e-2  # todo:5e-4,1e-3,5e-3
 root_path = "./"
-source_list = "./ssd/ssd-list-shallow_s.csv"
-target_list = "./ssd/ssd-list-deep_s.csv"  # todo: 70500
-validation_list = './ssd/ssd-list-deep_s.csv'
+source_list = "./List/dygz-list-shallow_s.csv"  # ssd_train_s.csv ssd-list-shallow_s
+# target_list = "./ssd/ssd_adaption_list.csv"  # todo: 70500
+target_list = "./List/dygz-list-deep_s.csv"
+validation_list = './List/dygz-list-deep_s.csv'  # ssd_val_s.csv ssd-list-deep_s
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
-ckpt_path = './ckpt_d1500_ssd_parallelmlp/'  # todo:wommd
-ckpt_model = './ckpt_d1500_ssd_parallelpre/model_epoch50.pth'
-ckpt_model_mlp = './ckpt_d1500_ssd_parallelmlp_0401/model_epoch_mlp6.pth'
-parallel = True
+# ckpt_path = './ckpt_d1500_ssd_parallelpre_210513/'  # todo:wommd
+ckpt_path = './ckpt_d1500_dygz_transfer_hete/'  # todo:wommd
+ckpt_model = './ckpt_d1500_dygz_parallelpre/model_epoch50.pth'
+ckpt_model_mlp = './ckpt_d1500_dygz_parallelmlp_0401/model_epoch_mlp6.pth'
+parallel = False
 mlp_pre = False
-branch_fixed = True
+branch_fixed = False
+transfer = True
+heterogeneity=True
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -97,11 +102,11 @@ source_dataset = custom_dset(txt_path=source_list, nx=227, nz=227, labeled=True)
 target_dataset = custom_dset(txt_path=target_list, nx=227, nz=227, labeled=True)  # todo:transform=None
 validation_dataset = custom_dset(txt_path=validation_list, nx=227, nz=227, labeled=True)
 
-source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=10, pin_memory=True,
+source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True,
                            drop_last=True)
-target_train_loader = DataLoader(target_dataset, batch_size=batch_size, shuffle=True, num_workers=10, pin_memory=True,
+target_train_loader = DataLoader(target_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True,
                                  drop_last=True)
-target_test_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=10,
+target_test_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=1,
                                 pin_memory=True, drop_last=True)
 
 # source_loader = data_loader.load_training(root_path, source_name, batch_size, kwargs)
@@ -185,7 +190,7 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                     {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L12.parameters(), 'lr': LEARNING_RATE},
                 ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
             optimizer_mlp = torch.optim.Adam(model_mlp.classifier.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
         elif optimizer_arg == 'adamw':
@@ -194,7 +199,7 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                     {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L12.parameters(), 'lr': LEARNING_RATE},
                 ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
             optimizer_mlp = torch.optim.Adam(model_mlp.classifier.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
         elif optimizer_arg == 'radam':
@@ -203,53 +208,107 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                     {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.L12.parameters(), 'lr': LEARNING_RATE},
                 ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
             optimizer_mlp = torch.optim.Adam(model_mlp.classifier.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
-    if parallel:
-        if optimizer_arg == 'Adam':
-            optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
-                [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
-                    {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
-                    {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
-                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
-            optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
-        if optimizer_arg == 'radam':
-            optimizer = radam.RAdam(  # filter(lambda p: p.requires_grad,
-                [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
-                    {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
-                    {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
-                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
-            optimizer_mlp = radam.RAdam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
-        if optimizer_arg == 'adamw':
-            optimizer = radam.AdamW(  # filter(lambda p: p.requires_grad,
-                [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
-                    {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
-                    {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
-                    {'params': model.L11.parameters(), 'lr': LEARNING_RATE},
-                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
-            optimizer_mlp = radam.AdamW(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
     else:
-        if optimizer_arg == 'Adam':
-            optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
-                [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+        if parallel:
+            if optimizer_arg == 'Adam':
+                optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
+                    [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': filter(lambda p: p.requires_grad, model.features.parameters())},
+                        # lr=LEARNING_RATE / 10
+                        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L12.parameters(), 'lr': LEARNING_RATE},
+                    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+                optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+            if optimizer_arg == 'radam':
+                optimizer = radam.RAdam(  # filter(lambda p: p.requires_grad,
+                    [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': filter(lambda p: p.requires_grad, model.features.parameters())},
+                        # lr=LEARNING_RATE / 10
+                        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L12.parameters(), 'lr': LEARNING_RATE},
+                    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+                optimizer_mlp = radam.RAdam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+            if optimizer_arg == 'adamw':
+                optimizer = radam.AdamW(  # filter(lambda p: p.requires_grad,
+                    [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': filter(lambda p: p.requires_grad, model.features.parameters())},
+                        # lr=LEARNING_RATE / 10
+                        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L10.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L12.parameters(), 'lr': LEARNING_RATE},
+                    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+                optimizer_mlp = radam.AdamW(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+        # elif transfer:
+        elif 0:
+            if optimizer_arg == 'Adam':
+                optimizer = torch.optim.Adam(
+                    [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': filter(lambda p: p.requires_grad, model.features.parameters())},
+                        # lr=LEARNING_RATE / 10
+                        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+            elif optimizer_arg == 'radam':
+                optimizer = radam.RAdam(  # filter(lambda p: p.requires_grad,
+                    [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': filter(lambda p: p.requires_grad, model.features.parameters())},
+                        # lr=LEARNING_RATE / 10
+                        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+            elif optimizer_arg == 'adamw':
+                optimizer = radam.AdamW(  # filter(lambda p: p.requires_grad,
+                    [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': filter(lambda p: p.requires_grad, model.features.parameters())},
+                        # lr=LEARNING_RATE / 10
+                        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L7.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
+                    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+
+        elif transfer:
+        # else:
+            if optimizer_arg == 'Adam':
+                optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
+                    [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': filter(lambda p: p.requires_grad, model.features.parameters())},
+                        # lr=LEARNING_RATE / 10
+                        {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
+                        {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+                    ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
+                # optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+            elif optimizer_arg == 'radam':
+                optimizer = radam.RAdam(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
                     {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
                     {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
@@ -258,37 +317,24 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                     {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
                     {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)  # todo:momentum=momentum,
-            optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+                # optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
 
-        elif optimizer_arg == 'radam':
-            optimizer = radam.RAdam(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
-                {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
-                {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-            ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
-            optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
-
-        elif optimizer_arg == 'adamw':
-            optimizer = radam.AdamW(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
-                {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
-                {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
-                {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-            ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
-            optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
+            elif optimizer_arg == 'adamw':
+                optimizer = radam.AdamW(params=[  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
+                    {'params': filter(lambda p: p.requires_grad, model.features.parameters())},  # lr=LEARNING_RATE / 10
+                    {'params': model.l6.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.cls1.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.cls2.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.l7.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.cls4.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.l8.parameters(), 'lr': LEARNING_RATE},
+                    {'params': model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+                ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
+                # optimizer_mlp = torch.optim.Adam(model_mlp.parameters(), lr=LEARNING_RATE, weight_decay=l2_decay)
 
     model.train()
-    if parallel == True or mlp_pre == True:
+    if parallel or mlp_pre:
         model_mlp.train()
 
     iter_source = iter(source_loader)
@@ -316,6 +362,7 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
         logging.debug('if cuda:')
         if cuda:
             logging.debug('push source data to gpu')
+            torch.cuda.empty_cache()
             data_source, label_source, coordinate_source, fluid_source = data_source.cuda(), label_source.cuda(), coordinate_source.cuda(), fluid_source.cuda()
             logging.debug('push target data to gpu')
             data_target, coordinate_target, fluid_target = data_target.cuda(), coordinate_target.cuda(), fluid_target.cuda()
@@ -339,13 +386,13 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                                                               coordinate_target, fluid_source, fluid_target,
                                                               heterogeneity=heterogeneity, blending=blending,
                                                               parallel=parallel, fluid_feature=fluid_feature)  # todo
-        if mlp_pre == True:
+        if mlp_pre:
             fluid_pred = model_mlp.classifier(fluid_feature)
         logging.debug('Calculating loss...')
 
         # softmax_score = F.softmax(score_source_pred, dim=1)  # todo: parallel
 
-        if parallel == True or blending == True:
+        if parallel or blending:
             # print(new_feature_pred)
             prob_source_pred = F.softmax(new_feature_pred, dim=1)
             y_1 = prob_source_pred[:, 1]
@@ -432,11 +479,11 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
         logging.debug('computing the derivative of the loss w.r.t. the params')
         if mlp_pre == False:
             loss.backward()
-            for name, params in model_mlp.named_parameters():
-                if name.find('weight') != -1:
-                    torch.nn.utils.clip_grad_norm(params, 5e-3)
-                if name.find('bias') != -1:
-                    torch.nn.utils.clip_grad_norm(params, 5e-3)
+            # for name, params in model_mlp.named_parameters():
+            #     if name.find('weight') != -1:
+            #         torch.nn.utils.clip_grad_norm(params, 5e-3)
+            #     if name.find('bias') != -1:
+            #         torch.nn.utils.clip_grad_norm(params, 5e-3)
             for name, params in model.named_parameters():
                 if name.find('weight') != -1:
                     torch.nn.utils.clip_grad_norm(params, 5e-3)
@@ -447,7 +494,8 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
 
         logging.debug('updating params based on the gradients')
         optimizer.step()
-        if parallel == True or mlp_pre == True:
+        # optimizer.zero_grad()
+        if parallel or mlp_pre:
             optimizer_mlp.step()
 
         if i % log_interval == 0:
@@ -488,13 +536,13 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                      update='append',
                      opts={'title': 'training accuracy'})
             continue
-            # todo:mmd result
-            print('{} Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
-                datetime.now(), epoch, i * len(data_source), len_source_dataset,
-                                       100. * i / len_source_loader, loss.data[0], loss_cls.data[0],
-                # !!!!
-                # loss_mmd))
-                loss_mmd.data[0]))
+        torch.cuda.empty_cache()
+            # print('{} Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
+            #     datetime.now(), epoch, i * len(data_source), len_source_dataset,
+            #                            100. * i / len_source_loader, loss.data[0], loss_cls.data[0],
+            #     # !!!!
+            #     # loss_mmd))
+            #     loss_mmd.data[0]))               # todo:mmd result
 
 
 def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
@@ -516,7 +564,7 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
         data, label, fluid_target = data.float(), label.long(), fluid_target.float()
         if cuda:
             data, label, fluid_target = data.cuda(), label.cuda(), fluid_target.cuda()
-        data, label, fluid_target = Variable(data, volatile=True), Variable(label), Variable(fluid_target)
+        data, label, fluid_target = Variable(data, volatile=True), Variable(label, volatile=True), Variable(fluid_target)
         if parallel == True or mlp_pre == True:
             fluid_feature = model_mlp.features(fluid_target)
         else:
@@ -526,10 +574,10 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
                                               fluid_target,
                                               heterogeneity=heterogeneity,
                                               blending=blending, parallel=parallel, fluid_feature=fluid_feature)
-        if mlp_pre == True:
+        if mlp_pre:
             fluid_pred = model_mlp.classifier(fluid_feature)
 
-        if parallel == True or blending == True:
+        if parallel or blending:
             test_loss += F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label, size_average=False).data[
                 0]  # sum up batch loss
             loss_val = F.nll_loss(F.log_softmax(new_feature_pred, dim=1), label).data[0]
@@ -625,6 +673,8 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
     print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}, auc: {}\n'.format(
         datetime.now(), test_name, test_loss, correct, len_test_dataset,
         100. * correct / len_test_dataset, F1score, auc_test_all))
+    logging.debug('auc = %s' % (auc_test_all))
+    torch.cuda.empty_cache()
 
     return correct
 
@@ -647,7 +697,7 @@ def load_ckpt_mlp(model_mlp):
 if __name__ == '__main__':
     # model = models.DANNet(num_classes=2)  # Models.py#todo:ResNet
 
-    model = models.DAN_with_Alex(num_classes=2, branch_fixed=branch_fixed)
+    model = models.DAN_with_Alex(num_classes=2, branch_fixed=branch_fixed, transfer=transfer)
     print(model)
     if parallel == True or mlp_pre == True:
         model_mlp = models.new_net()
@@ -660,22 +710,22 @@ if __name__ == '__main__':
 
     if cuda:
         model.cuda()
-        if parallel == True or mlp_pre == True:
+        if parallel or mlp_pre:
             model_mlp.cuda()
     if mlp_pre == False:
         model = load_pretrain_alex(model, alexnet_model=True)
-    if parallel == True:
+    if parallel:
         model = load_ckpt(model)
         model_mlp = load_ckpt_mlp(model_mlp)
     for epoch in range(1, epochs + 1):
-        train(epoch, model, model_mlp=model_mlp, heterogeneity=False, blending=False)  # TODO
-        t_correct = test(epoch, model, model_mlp=model_mlp, heterogeneity=False, blending=False)
+        train(epoch, model, model_mlp=model_mlp, heterogeneity=heterogeneity, blending=False)  # TODO
+        t_correct = test(epoch, model, model_mlp=model_mlp, heterogeneity=heterogeneity, blending=False)
         # Save models.
         if mlp_pre == False:
             ckpt_name = os.path.join(ckpt_path, 'model_epoch' + str(epoch) + '.pth')
             print('Save model: {}'.format(ckpt_name))
             torch.save(obj=model.state_dict(), f=ckpt_name)
-        if parallel == True or mlp_pre == True:
+        if parallel or mlp_pre:
             ckpt_name_mlp = os.path.join(ckpt_path, 'model_epoch_mlp' + str(epoch) + '.pth')
             print('Save model: {}'.format(ckpt_name_mlp))
             torch.save(obj=model_mlp.state_dict(), f=ckpt_name_mlp)

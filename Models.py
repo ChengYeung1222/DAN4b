@@ -210,7 +210,7 @@ class AlexNet(nn.Module):
     def __init__(self, num_classes=2):
         super(AlexNet, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(5, 64, kernel_size=11, stride=4, padding=2),  # todo
+            nn.Conv2d(20, 64, kernel_size=11, stride=4, padding=2),  # todo
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
             # CrossMapLRN(5, 0.0001, 0.75),#todo
@@ -233,7 +233,6 @@ class AlexNet(nn.Module):
                 nn.Dropout(0.5),  # todo
                 nn.Linear(256 * 6 * 6, 4096),
                 nn.ReLU(inplace=True),
-
                 nn.Dropout(0.5),  # todo:0.5,0.7
                 nn.Linear(4096, 4096),  # todo:4096
                 nn.ReLU(inplace=True),
@@ -243,6 +242,7 @@ class AlexNet(nn.Module):
                 nn.ReLU(inplace=True),  # todo:parallel [8]
                 nn.Linear(256, num_classes),
                 nn.Linear(512, 512),
+                nn.ReLU(inplace=True),
                 nn.Linear(512, num_classes)
 
             )
@@ -297,9 +297,10 @@ class AlexNetFc(nn.Module):
 #         )
 class DAN_with_Alex(nn.Module):
 
-    def __init__(self, num_classes=2, branch_fixed=False):
+    def __init__(self, num_classes=2, branch_fixed=False, transfer=False):
         super(DAN_with_Alex, self).__init__()
         # self.conv1=alexnet().features[0]
+        self.transfer=transfer
         self.features = alexnet(branch_fixed=branch_fixed).features
         # for i in range(1,13):
         #     exec('self.features{} = alexnet().features[{}]'.format(i, i))
@@ -310,17 +311,24 @@ class DAN_with_Alex(nn.Module):
         self.l7 = alexnet(branch_fixed=branch_fixed).classifier[3]
         self.cls4 = alexnet(branch_fixed=branch_fixed).classifier[4]
         self.l8 = alexnet(branch_fixed=branch_fixed).classifier[5]
-        self.L7 = alexnet(branch_fixed=branch_fixed).classifier[7]
-        self.L9 = alexnet(branch_fixed=branch_fixed).classifier[9]
-        self.L10 = alexnet(branch_fixed=branch_fixed).classifier[10]
-        self.L11 = alexnet(branch_fixed=branch_fixed).classifier[11]
+        if self.transfer:
+            # pass
+            self.cls_fc = nn.Linear(4096, num_classes)  # todo:parallel
+            # self.L7 = alexnet(branch_fixed=branch_fixed).classifier[7]#todo：test
+            # self.L9 = alexnet(branch_fixed=branch_fixed).classifier[9]
+            # self.L10 = alexnet(branch_fixed=branch_fixed).classifier[10]
+            # self.L12 = alexnet(branch_fixed=branch_fixed).classifier[12]
+        else:
+            # self.L7 = alexnet(branch_fixed=branch_fixed).classifier[7]
+            # self.L9 = alexnet(branch_fixed=branch_fixed).classifier[9]
+            # self.L10 = alexnet(branch_fixed=branch_fixed).classifier[10]
+            # self.L12 = alexnet(branch_fixed=branch_fixed).classifier[12]
         # ++++++++++
-        self.cls_fc = nn.Linear(4096, num_classes)  # todo:parallel
 
-        # self.cls_fc = nn.Linear(2048, num_classes)
+            self.cls_fc = nn.Linear(4096, num_classes)#todo:test
 
     def forward(self, source, target, coordinate_source, coordinate_target, fluid_source, fluid_target, heterogeneity,
-                blending=False, parallel=False, fluid_feature=0.):
+                blending=False, parallel=False, fluid_feature=0.,):
         # fd_kernel=False):
         loss = .0
         # if heterogeneity == True:
@@ -353,9 +361,10 @@ class DAN_with_Alex(nn.Module):
             #     pass
             # else:
             # if blending != True:
-            # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-            #                                  heterogeneity=heterogeneity)  # todo: add mmd
-            logging.debug('kernel loss = %s' % (loss))
+            if self.transfer:
+                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                                                 heterogeneity=False)  # todo: add mmd
+                logging.debug('kernel loss = %s' % (loss))
         self.cls1.cuda()
         self.cls2.cuda()
         source = self.cls1(source)
@@ -371,16 +380,17 @@ class DAN_with_Alex(nn.Module):
             target = self.l7(target)
             # !!!!!!!!
             # if blending != True:
-            # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-            #                                  heterogeneity=heterogeneity)  # todo
-            logging.debug('kernel loss = %s' % (loss))
+            if self.transfer:
+                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                                                 heterogeneity=heterogeneity)  # todo
+                logging.debug('kernel loss = %s' % (loss))
         self.cls4.cuda()
         source = self.cls4(source)
         if self.training == True:
             target = self.l7(target)
             target = self.cls4(target)
         source = self.l8(source)
-        if blending == True:
+        if blending:
             source = alexnet().cuda().classifier[7](source)
             source = alexnet().cuda().classifier[8](source)
 
@@ -393,9 +403,10 @@ class DAN_with_Alex(nn.Module):
                 target = alexnet().cuda().classifier[8](target)
             # !!!!!!!!
             # if blending != True:
-            # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-            #                                  heterogeneity=heterogeneity)  # todo:wommd
-            logging.debug('kernel loss = %s' % (loss))
+            if self.transfer:
+                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                                                 heterogeneity=heterogeneity)  # todo:wommd
+                logging.debug('kernel loss = %s' % (loss))
         # +++++++++++
         # new_features = Variable(torch.rand(256, 2), requires_grad=True).cuda()  # todo: parallel
         # source = torch.cat((source, new_features), dim=1)
@@ -405,21 +416,28 @@ class DAN_with_Alex(nn.Module):
         #     new_cat = torch.cat((source, new_features), dim=1)
         #     fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
         #     new_cat = fc_out(new_cat)
-        if parallel == True:
-            source = alexnet().cuda().classifier[7](source)
+        if parallel:
+            source = self.L7(source)
             source = alexnet().cuda().classifier[8](source)
             new_cat = torch.cat((source, fluid_feature), dim=1)
-            new_cat = alexnet().cuda().classifier[10](new_cat)
+            new_cat = self.L10(new_cat)
             new_cat = alexnet().cuda().classifier[11](new_cat)
+            new_cat = self.L12(new_cat)
             # fc_out = nn.Linear(new_cat.size(1), self.cls_fc.out_features).cuda()
             # new_cat = fc_out(new_cat)
+        elif self.transfer:
+            # source=self.L7(source)#todo：test
+            # source=alexnet().cuda().classifier[8](source)
+            # source=self.L9(source)
+            source = self.cls_fc(source)
+            new_cat = 0.
         else:
             source = self.cls_fc(source)
             new_cat = 0.
 
         # if self.training == True:
         #     target = alexnet().classifier[6](target)
-
+        # logging.debug('MMD loss:%s' % (loss))
         return source, loss, new_cat
 
 
@@ -444,10 +462,10 @@ def alexnet(pretrained=False, frozen=False, branch_fixed=True, **kwargs):
             #     params.requires_grad = False
             #     if name.find('7') != -1:
             #         break
-                # count = 0
-                # while (count < 7):
-                #     params.requires_grad = False
-                #     count += 1
+            # count = 0
+            # while (count < 7):
+            #     params.requires_grad = False
+            #     count += 1
         if frozen:  # todo:
             if name.find('3') != -1:
                 params.requires_grad = False

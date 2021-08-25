@@ -4,6 +4,7 @@
 import torch
 from torch.autograd import Variable
 import numpy as np
+import torch.nn as nn
 
 import logging
 
@@ -126,9 +127,86 @@ def distance_kernel_beta(coordinate_source, coordinate_target, kernel_mul=2., ke
 def distance_kernel(source, target, coordinate_source, coordinate_target, ):
     n_samples = int(coordinate_source.size()[0]) + int(coordinate_target.size()[0])
     total = torch.cat([coordinate_source, coordinate_target], dim=0)
+    total = (total - total.mean()) / total.std()  # todo:normalization
     k_mmd = mk_mmd(source, target)
     k_dist = torch.zeros(int(total.size(0)), int(total.size(0))).cuda()
     k_dist = Variable(k_dist)
+
+    def Sigma_solution_trace(total=total, k_mmd=k_mmd):  # todo
+        Sigma = Variable(torch.eye(3), requires_grad=True).float().cuda()
+        total = total.cuda()
+
+        k_mmd = k_mmd.cuda()
+
+        while True:
+            m = torch.matmul(total, Sigma)
+            m = torch.matmul(m, total.t())
+            # logging.debug('m:%s' % (m))
+
+            # diagonal = torch.diag(m)
+            # logging.debug('diagonal:%s' % (diagonal))这句不幸
+            te = torch.diag(m).unsqueeze(0).expand(int(total.size(0)), int(total.size(0)))
+            # tr = diagonal.unsqueeze(1).expand(int(total.size(0)), int(total.size(0)))
+
+            gaussian = -2 * m + te + te.t()
+            # print(torch.exp(-gaussian))
+            left = k_mmd * torch.exp(-gaussian)  # omega
+            # logging.debug('left:%s' % (left))
+            nabla_Sigma = Variable(torch.zeros(3, 3)).cuda()
+            for u in range(3):
+                for v in range(u, 3):
+                    A = torch.matmul(total[:, u].contiguous().view(int(total.size(0)), 1),
+                                     total[:, v].contiguous().view(1, int(total.size(0))))
+                    B = torch.diag(A).unsqueeze(0).expand(int(total.size(0)),
+                                                          int(total.size(0))) - A - A.t() + torch.diag(
+                        A).unsqueeze(1).expand(int(total.size(0)), int(total.size(0)))
+                    H = left * B
+                    H = torch.sum(H)
+
+                    # H_sqrt = torch.sqrt(torch.abs(H))
+                    negative2zero = nn.ReLU(inplace=True)
+                    H_sqrt = torch.sqrt(negative2zero(H))
+                    # H_sqrt = torch.sqrt(H)
+                    if u == v:
+                        nabla_Sigma[u, v] = H_sqrt  # / torch.trace(H_sqrt)
+                    else:
+                        nabla_Sigma[u, v] = H_sqrt  # / torch.trace(H_sqrt)
+                        nabla_Sigma[v, u] = H_sqrt  # / torch.trace(H_sqrt)
+                    # if u == v:
+                    #     nabla_Sigma[u, v] = H  # / torch.trace(H_sqrt)
+                    # else:
+                    #     nabla_Sigma[u, v] = H  # / torch.trace(H_sqrt)
+                    #     nabla_Sigma[v, u] = H  # / torch.trace(H_sqrt)
+            # e, v = torch.eig(nabla_Sigma, eigenvectors=True)
+            # logging.debug('e:%s' % (e))
+            # e = torch.diag(e[:, 0])
+            # nabla_Sigma = v.matmul(torch.sqrt(e))
+            # nabla_Sigma = nabla_Sigma.matmul(v.transpose(0, 1))
+            trace_nabla_Sigma = torch.trace(nabla_Sigma)
+            nabla_Sigma /= trace_nabla_Sigma
+            # if u == v:
+            #     nabla_Sigma[u, v] = torch.mean(H_sqrt / torch.trace(H_sqrt))
+            # else:
+            #     nabla_Sigma[u, v] = torch.mean(H_sqrt / torch.trace(H_sqrt))
+            #     nabla_Sigma[v, u] = torch.mean(H_sqrt / torch.trace(H_sqrt))
+            norm_nabla = torch.norm(Sigma - nabla_Sigma).cpu().data.numpy()
+            logging.debug('norm_nabla:%s' % (norm_nabla))
+            if norm_nabla < 0.1:  # todo
+                break
+            elif np.isnan(norm_nabla):
+                nabla_Sigma=Variable(torch.eye(3), requires_grad=True).float().cuda()
+                break
+            Sigma = nabla_Sigma
+            torch.cuda.empty_cache()
+            logging.debug('Sigma:%s' % (Sigma))
+            # Sigma.data -= nabla_Sigma.data * lr
+            # print(Sigma)
+            # eigs_s = np.linalg.eigvals(Sigma.data.cpu())
+            # logging.debug('eigs_s:%s' % (eigs_s))
+            # print(eigs_s)
+            # print('{},{}').format(count, Sigma)
+
+        return Sigma
 
     def Sigma_solution_wo_loop(lr=1e-2, total=total, k_mmd=k_mmd):
         Sigma = Variable(torch.eye(3), requires_grad=True).float().cuda()
@@ -143,7 +221,7 @@ def distance_kernel(source, target, coordinate_source, coordinate_target, ):
         tr = diagonal.unsqueeze(1).expand(int(total.size(0)), int(total.size(0)))
 
         gaussian = -2 * m + te + tr
-        left = -k_mmd * torch.exp(-gaussian)
+        left = -k_mmd * torch.exp(-gaussian)  # -omega
         nabla_Sigma = Variable(torch.zeros(3, 3)).cuda()
         for u in range(3):
             for v in range(u, 3):
@@ -157,6 +235,7 @@ def distance_kernel(source, target, coordinate_source, coordinate_target, ):
                 else:
                     nabla_Sigma[u, v] = torch.mean(H)
                     nabla_Sigma[v, u] = torch.mean(H)
+
             norm_nabla = torch.norm(nabla_Sigma).cpu().data.numpy()
             logging.debug('norm_nabla:%s' % (norm_nabla))
             if norm_nabla < 0.1:  # todo
@@ -218,7 +297,8 @@ def distance_kernel(source, target, coordinate_source, coordinate_target, ):
             # print('{},{}').format(count, Sigma)
         return Sigma
 
-    Sigma = Sigma_solution_wo_loop()
+    Sigma = Sigma_solution_trace()
+    # Sigma = Sigma_solution_wo_loop()
     # Sigma = Variable(torch.eye(3), requires_grad=True).float().cuda()  # todo:debug dist kernel
 
     for i in range(total.size()[0]):
@@ -296,27 +376,37 @@ def mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, k
     kernels = guassian_kernel_no_loop(source, target,
                                       kernel_mul=kernel_mul, kernel_num=kernel_num, fix_sigma=fix_sigma)
     if heterogeneity == True:
-        # kernels_dist = distance_kernel(source, target, coordinate_source, coordinate_target)
-        kernels_dist = distance_kernel_beta(coordinate_source, coordinate_target)
+        kernels_dist = distance_kernel(source, target, coordinate_source, coordinate_target)
+        # kernels_dist = distance_kernel_beta(coordinate_source, coordinate_target)
         for i in range(batch_size * 2):
             for j in range(batch_size * 2):
                 if torch.abs(kernels_dist[i, j]).cpu().data.numpy() > 2e+1:
                     kernels_dist[i, j] = 0
 
-        XX = kernels[:batch_size, :batch_size] + kernels[:batch_size, :batch_size] * \
-             kernels_dist[:batch_size, :batch_size] * Lambda
+        XX = kernels[:batch_size, :batch_size] * kernels_dist[:batch_size, :batch_size] * Lambda
         # todo:核都是1
         # Variable(torch.ones(batch_size,
         #                     batch_size)).cuda()  # \
-        YY = kernels[batch_size:, batch_size:] + kernels[batch_size:, batch_size:] * \
-             kernels_dist[batch_size:, batch_size:] * Lambda
+        YY = kernels[batch_size:, batch_size:] * kernels_dist[batch_size:, batch_size:] * Lambda
         # Variable(torch.ones(batch_size,
         #                     batch_size)).cuda()  # \
-        XY = kernels[:batch_size, batch_size:] + kernels[:batch_size, batch_size:] * \
-             kernels_dist[:batch_size, batch_size:] * Lambda
+        XY = kernels[:batch_size, batch_size:] * kernels_dist[:batch_size, batch_size:] * Lambda
 
-        YX = kernels[batch_size:, :batch_size] + kernels[batch_size:, :batch_size] * \
-             kernels_dist[batch_size:, :batch_size] * Lambda
+        YX = kernels[batch_size:, :batch_size] * kernels_dist[batch_size:, :batch_size] * Lambda
+        # XX = kernels[:batch_size, :batch_size] + kernels[:batch_size, :batch_size] * \
+        #      kernels_dist[:batch_size, :batch_size] * Lambda
+        # # todo:核都是1
+        # # Variable(torch.ones(batch_size,
+        # #                     batch_size)).cuda()  # \
+        # YY = kernels[batch_size:, batch_size:] + kernels[batch_size:, batch_size:] * \
+        #      kernels_dist[batch_size:, batch_size:] * Lambda
+        # # Variable(torch.ones(batch_size,
+        # #                     batch_size)).cuda()  # \
+        # XY = kernels[:batch_size, batch_size:] + kernels[:batch_size, batch_size:] * \
+        #      kernels_dist[:batch_size, batch_size:] * Lambda
+        #
+        # YX = kernels[batch_size:, :batch_size] + kernels[batch_size:, :batch_size] * \
+        #      kernels_dist[batch_size:, :batch_size] * Lambda
     # elif fd_kernel == True:
     #     # logging.debug('x & x prime')
     #     XX = kernels[:batch_size, :batch_size] * Variable(
