@@ -51,39 +51,64 @@ logger.addHandler(fh)
 # To use this:
 # python -m visdom.server
 # http://localhost:8097/
-# vis = visdom.Visdom(env=u'ssdparallelpre_Alex_1500')  # todo
-vis = visdom.Visdom(env=u'dygztransferhete_Alex_1500')  # todo
+# vis = visdom.Visdom(env=u'ssdparallelpre_Alex_1500')
+# vis = visdom.Visdom(env=u'dygztransferhete_Alex_wosammd')
+# vis = visdom.Visdom(env=u'dygztransferhete_uni')  # todo
+vis = visdom.Visdom(env=u'ssdtransferhete_uni')
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
-batch_size = 256  # todo
-epochs = 25  # depth: 1500 epoch: 48  auc: 0.928#todo
-lr = 1e-5  # todo:3e-5(0728)
+batch_size = 256  # todo:
+epochs = 100  # todo:
+# dygz 1005: 40, 1013： 50
+lr = 1e-5  # todo:
+# dygz 3e-5(0728), 1013: 5e-5
 momentum = 0.9
 no_cuda = False
-seed = 5  # todo:5,38;8,50;1, 26;2,2
-# todo: dygz,32:1;ssd: 30, 11
-log_interval = 31  # ssd30,20
-log_interval_test = 5  # ssd17,30
-l2_decay = 5e-2  # todo:5e-4,1e-3,5e-3
+seed = 5  # todo:
+# 5,38;8,50;1, 26;2,2
+
+# dygz,32:1;ssd: 30, 11
+
+# dygz 1005: 31:5
+# ssd 1018: 30:9
+log_interval = 30  # ssd30,20
+log_interval_test = 9  # ssd17,30
+
+l2_decay = 1e-3  # todo:5e-4,
+# dygz 1013: 1e-3,5e-3
 root_path = "./"
-source_list = "./List/dygz-list-shallow_s.csv"  # ssd_train_s.csv ssd-list-shallow_s
-# target_list = "./ssd/ssd_adaption_list.csv"  # todo: 70500
-target_list = "./List/dygz-list-deep_s.csv"
-validation_list = './List/dygz-list-deep_s.csv'  # ssd_val_s.csv ssd-list-deep_s
+
+# source_list = "./List/dygz-list-shallow_s.csv"  # ssd_train_s.csv ssd-list-shallow_s
+# target_list = "./List/dygz-list-deep_s.csv"
+
+# dygz 1013
+# source_list='./List/dygz_train_list.csv'
+# target_list='./List/dygz_val_list.csv'
+# validation_list = './List/dygz_val_list.csv'
+
+source_list='./ssd/ssd_train_s_20c.csv'
+target_list = "./ssd/ssd_adaption_list_20c.csv"
+validation_list='./ssd/ssd_val_s_20c.csv'
+
+# ssd_val_s.csv ssd-list-deep_s
 source_name = 'shallow zone'  # todo
 target_name = 'deep zone'
 test_name = 'deep zone/validation'
+
 # ckpt_path = './ckpt_d1500_ssd_parallelpre_210513/'  # todo:wommd
-ckpt_path = './ckpt_d1500_dygz_transfer_hete/'  # todo:wommd
+# ckpt_path = './ckpt_d1500_dygz_transfer_hete_wosammd/'  # todo:wommd
+# ckpt_path = './ckpt_d1500_dygz_transfer_hete/' # dygz 1013
+ckpt_path = './ckpt_uni_ssd_transfer_hete/'
+
 ckpt_model = './ckpt_d1500_dygz_parallelpre/model_epoch50.pth'
 ckpt_model_mlp = './ckpt_d1500_dygz_parallelmlp_0401/model_epoch_mlp6.pth'
 parallel = False
 mlp_pre = False
 branch_fixed = False
-transfer = True
-heterogeneity=True
+transfer = True  # todo
+heterogeneity = True  # todo
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -174,7 +199,7 @@ def load_pretrain(model, resnet_model=True):
     return model
 
 
-def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='radam', blending=True):  # todo：换优化器
+def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='Adam', blending=True):  # todo：换优化器
     LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
@@ -291,8 +316,8 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                         {'params': model.L9.parameters(), 'lr': LEARNING_RATE},
                     ], lr=LEARNING_RATE / 10, weight_decay=l2_decay)
 
-        elif transfer:
-        # else:
+        # elif transfer:
+        else:
             if optimizer_arg == 'Adam':
                 optimizer = torch.optim.Adam(  # filter(lambda p: p.requires_grad,
                     [  # {'params': model.conv1.parameters(), 'lr': LEARNING_RATE},
@@ -537,12 +562,12 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
                      opts={'title': 'training accuracy'})
             continue
         torch.cuda.empty_cache()
-            # print('{} Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
-            #     datetime.now(), epoch, i * len(data_source), len_source_dataset,
-            #                            100. * i / len_source_loader, loss.data[0], loss_cls.data[0],
-            #     # !!!!
-            #     # loss_mmd))
-            #     loss_mmd.data[0]))               # todo:mmd result
+        # print('{} Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
+        #     datetime.now(), epoch, i * len(data_source), len_source_dataset,
+        #                            100. * i / len_source_loader, loss.data[0], loss_cls.data[0],
+        #     # !!!!
+        #     # loss_mmd))
+        #     loss_mmd.data[0]))               # todo:mmd result
 
 
 def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
@@ -559,12 +584,17 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
     iter_test = iter(target_test_loader)
     num_iter_test = len_test_loader
 
+    auc_arr = np.empty(0)
+    label_arr = np.empty(0)
+    pred_arr = np.empty(0)
+
     for i in range(1, num_iter_test):
         data, label, coordinate_target, fluid_target = next(iter_test)  # data_shape: torch.Size([32, 3, 224, 224])
         data, label, fluid_target = data.float(), label.long(), fluid_target.float()
         if cuda:
             data, label, fluid_target = data.cuda(), label.cuda(), fluid_target.cuda()
-        data, label, fluid_target = Variable(data, volatile=True), Variable(label, volatile=True), Variable(fluid_target)
+        data, label, fluid_target = Variable(data, volatile=True), Variable(label, volatile=True), Variable(
+            fluid_target)
         if parallel == True or mlp_pre == True:
             fluid_feature = model_mlp.features(fluid_target)
         else:
@@ -625,6 +655,9 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
         #                                          pos_label=1)
         # auc_value = metrics.auc(fpr, tpr)
 
+        label_arr = np.append(label_arr, label.data.cpu().numpy())
+        pred_arr = np.append(pred_arr, prob_val_pred.data[:, 1].cpu().numpy())
+
         fpr, tpr, thresholds = metrics.roc_curve(y_true=label.data, y_score=prob_val_pred.data[:, 1],
                                                  pos_label=1)
 
@@ -668,6 +701,15 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
                      update='append',
                      opts={'title': 'testing loss'})
 
+    fpr, tpr, thresholds = metrics.roc_curve(y_true=label_arr,
+                                             y_score=pred_arr,
+                                             pos_label=1)
+    auc_value_test = metrics.auc(fpr, tpr)
+    vis.line(X=np.array([epoch]), Y=np.array([auc_value_test]),
+             win='testing auc per epoch',
+             update='append',
+             opts={'title': 'testing auc per epoch'})
+
     test_loss /= len_test_dataset
     auc_test_all /= num_iter_test
     print('\n{}  {} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%), F1score: {}, auc: {}\n'.format(
@@ -699,7 +741,7 @@ if __name__ == '__main__':
 
     model = models.DAN_with_Alex(num_classes=2, branch_fixed=branch_fixed, transfer=transfer)
     print(model)
-    if parallel == True or mlp_pre == True:
+    if parallel or mlp_pre:
         model_mlp = models.new_net()
         # model_mlp.classifier = torch.nn.Sequential(torch.nn.Linear(256, 2))
         print(model_mlp)

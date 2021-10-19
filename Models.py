@@ -363,7 +363,7 @@ class DAN_with_Alex(nn.Module):
             # if blending != True:
             if self.transfer:
                 loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-                                                 heterogeneity=False)  # todo: add mmd
+                                                 heterogeneity=heterogeneity)  # todo: add mmd
                 logging.debug('kernel loss = %s' % (loss))
         self.cls1.cuda()
         self.cls2.cuda()
@@ -451,7 +451,7 @@ def new_net():
     return model
 
 
-def alexnet(pretrained=False, frozen=False, branch_fixed=True, **kwargs):
+def alexnet(pretrained=False, frozen=True, branch_fixed=True, **kwargs):#todo
     model = AlexNet()
     for name, params in model.named_parameters():
         if branch_fixed:
