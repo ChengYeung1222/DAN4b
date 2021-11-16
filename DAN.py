@@ -54,19 +54,20 @@ logger.addHandler(fh)
 # vis = visdom.Visdom(env=u'ssdparallelpre_Alex_1500')
 # vis = visdom.Visdom(env=u'dygztransferhete_Alex_wosammd')
 # vis = visdom.Visdom(env=u'dygztransferhete_uni')  # todo
-vis = visdom.Visdom(env=u'ssdtransferhete_uni')
+vis = visdom.Visdom(env=u'ssdtransferhete_uni_break')
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Training settings
 batch_size = 256  # todo:
-epochs = 100  # todo:
-# dygz 1005: 40, 1013： 50
+# dygz 1005: 256
+epochs = 50  # todo: 1023: 100 1031: 60
+# dygz 1005: 40, 1013： 50, 1116:150
 lr = 1e-5  # todo:
-# dygz 3e-5(0728), 1013: 5e-5
+# dygz 3e-5(0728), 1013: 5e-5, 1116: 1e-5
 momentum = 0.9
 no_cuda = False
-seed = 5  # todo:
+seed = 5  # todo: 1116：5
 # 5,38;8,50;1, 26;2,2
 
 # dygz,32:1;ssd: 30, 11
@@ -78,6 +79,7 @@ log_interval_test = 9  # ssd17,30
 
 l2_decay = 1e-3  # todo:5e-4,
 # dygz 1013: 1e-3,5e-3
+# ssd 1023： 1e-3 1031: 5e-3
 root_path = "./"
 
 # source_list = "./List/dygz-list-shallow_s.csv"  # ssd_train_s.csv ssd-list-shallow_s
@@ -88,9 +90,9 @@ root_path = "./"
 # target_list='./List/dygz_val_list.csv'
 # validation_list = './List/dygz_val_list.csv'
 
-source_list='./ssd/ssd_train_s_20c.csv'
+source_list = './ssd/ssd_train_s_20c.csv'
 target_list = "./ssd/ssd_adaption_list_20c.csv"
-validation_list='./ssd/ssd_val_s_20c.csv'
+validation_list = './ssd/ssd_val_s_20c.csv'
 
 # ssd_val_s.csv ssd-list-deep_s
 source_name = 'shallow zone'  # todo
@@ -100,15 +102,18 @@ test_name = 'deep zone/validation'
 # ckpt_path = './ckpt_d1500_ssd_parallelpre_210513/'  # todo:wommd
 # ckpt_path = './ckpt_d1500_dygz_transfer_hete_wosammd/'  # todo:wommd
 # ckpt_path = './ckpt_d1500_dygz_transfer_hete/' # dygz 1013
-ckpt_path = './ckpt_uni_ssd_transfer_hete/'
-
-ckpt_model = './ckpt_d1500_dygz_parallelpre/model_epoch50.pth'
+ckpt_path = './ckpt_uni_ssd_transfer_hete_break/'
+# ckpt_model = './ckpt_uni_ssd_transfer_hete_1105/model_epoch7.pth'
+# ckpt_model = './ckpt_uni_ssd_transfer_hete_1107/model_epoch2.pth'
+ckpt_model = './ckpt_uni_ssd_transfer_hete_break_1116/model_epoch6.pth'
+# ckpt_model = './ckpt_d1500_dygz_parallelpre/model_epoch50.pth'
 ckpt_model_mlp = './ckpt_d1500_dygz_parallelmlp_0401/model_epoch_mlp6.pth'
 parallel = False
 mlp_pre = False
 branch_fixed = False
 transfer = True  # todo
 heterogeneity = True  # todo
+resume=True
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -127,11 +132,11 @@ source_dataset = custom_dset(txt_path=source_list, nx=227, nz=227, labeled=True)
 target_dataset = custom_dset(txt_path=target_list, nx=227, nz=227, labeled=True)  # todo:transform=None
 validation_dataset = custom_dset(txt_path=validation_list, nx=227, nz=227, labeled=True)
 
-source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True,
+source_loader = DataLoader(source_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True,
                            drop_last=True)
-target_train_loader = DataLoader(target_dataset, batch_size=batch_size, shuffle=True, num_workers=1, pin_memory=True,
+target_train_loader = DataLoader(target_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True,
                                  drop_last=True)
-target_test_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=1,
+target_test_loader = DataLoader(validation_dataset, batch_size=batch_size, shuffle=False, num_workers=1,  # todo:
                                 pin_memory=True, drop_last=True)
 
 # source_loader = data_loader.load_training(root_path, source_name, batch_size, kwargs)
@@ -199,7 +204,8 @@ def load_pretrain(model, resnet_model=True):
     return model
 
 
-def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='Adam', blending=True):  # todo：换优化器
+def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='radam', blending=True):  # todo
+    # ssd: 1031: Adam
     LEARNING_RATE = lr / math.pow((1 + 10 * (epoch - 1) / epochs), 0.75)  # todo:denominator: epochs
     print('learning rate{: .6f}'.format(LEARNING_RATE))
     # ResNet optimizer
@@ -756,6 +762,8 @@ if __name__ == '__main__':
             model_mlp.cuda()
     if mlp_pre == False:
         model = load_pretrain_alex(model, alexnet_model=True)
+    if resume:
+        model = load_ckpt(model)
     if parallel:
         model = load_ckpt(model)
         model_mlp = load_ckpt_mlp(model_mlp)

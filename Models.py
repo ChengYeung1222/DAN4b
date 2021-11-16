@@ -381,8 +381,8 @@ class DAN_with_Alex(nn.Module):
             # !!!!!!!!
             # if blending != True:
             if self.transfer:
-                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-                                                 heterogeneity=heterogeneity)  # todo
+                # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                #                                  heterogeneity=heterogeneity)  # todo：gaihuilai
                 logging.debug('kernel loss = %s' % (loss))
         self.cls4.cuda()
         source = self.cls4(source)
@@ -404,8 +404,8 @@ class DAN_with_Alex(nn.Module):
             # !!!!!!!!
             # if blending != True:
             if self.transfer:
-                loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
-                                                 heterogeneity=heterogeneity)  # todo:wommd
+                # loss += mmd.mmd_rbf_noaccelerate(source, target, coordinate_source, coordinate_target, kernel_i=0,
+                #                                  heterogeneity=heterogeneity)  # todo:gaihuilai
                 logging.debug('kernel loss = %s' % (loss))
         # +++++++++++
         # new_features = Variable(torch.rand(256, 2), requires_grad=True).cuda()  # todo: parallel
