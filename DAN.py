@@ -113,7 +113,7 @@ mlp_pre = False
 branch_fixed = False
 transfer = True  # todo
 heterogeneity = True  # todo
-resume=True
+resume = True
 
 # Create parent path if it doesn't exist
 if not os.path.isdir(ckpt_path):
@@ -485,7 +485,8 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
         # index_max=prob_source_pred_new.data.max(1)[1]
         # for ii in range(batch_size):
         #     prob.append(prob_source_pred_new.data[ii,index_max[ii]])
-        fpr, tpr, thresholds = metrics.roc_curve(y_true=label_source.data, y_score=prob_source_pred.data[:, 1],
+        fpr, tpr, thresholds = metrics.roc_curve(y_true=label_source.data.cpu().numpy(),
+                                                 y_score=prob_source_pred.data[:, 1].cpu().numpy(),
                                                  pos_label=1)
         auc_value = metrics.auc(fpr, tpr)
         TP += ((pred == 1) & (label_source.data.view_as(pred) == 1)).cpu().sum()
@@ -535,7 +536,8 @@ def train(epoch, model, model_mlp=None, heterogeneity=False, optimizer_arg='rada
             #             title='Training Loss',
             #             legend=['Loss']))
             if mlp_pre == False:
-                vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=loss_cls.cpu().data.numpy(),
+                vis.line(X=np.array([i + (epoch - 1) * len_source_loader]), Y=[loss_cls.cpu().data.numpy()],#np.array([loss_cls]),
+                         # .cpu().data.numpy(),
                          win='loss_cls',
                          update='append',
                          opts={'title': 'CNN risk'})
@@ -628,9 +630,8 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
 
 
         elif mlp_pre == False:
-            test_loss += F.nll_loss(F.log_softmax(s_output, dim=1), label, size_average=False).data[
-                0]  # sum up batch loss
-            loss_val = F.nll_loss(F.log_softmax(s_output, dim=1), label).data[0]
+            test_loss += F.nll_loss(F.log_softmax(s_output, dim=1), label, size_average=False).item()#.data[0]  # sum up batch loss
+            loss_val = F.nll_loss(F.log_softmax(s_output, dim=1), label).item()#.data[0]
             prob_val_pred = F.softmax(s_output, dim=1)
             y_1 = prob_val_pred[:, 1]
             y_0 = prob_val_pred[:, 0]
@@ -664,7 +665,7 @@ def test(epoch, model, model_mlp=None, heterogeneity=False, blending=False):
         label_arr = np.append(label_arr, label.data.cpu().numpy())
         pred_arr = np.append(pred_arr, prob_val_pred.data[:, 1].cpu().numpy())
 
-        fpr, tpr, thresholds = metrics.roc_curve(y_true=label.data, y_score=prob_val_pred.data[:, 1],
+        fpr, tpr, thresholds = metrics.roc_curve(y_true=label.data.cpu().numpy(), y_score=prob_val_pred.data[:, 1].data.cpu().numpy(),
                                                  pos_label=1)
 
         # if np.isnan(tpr).all():
